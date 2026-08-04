@@ -1,0 +1,35 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# next
+.next/
+out/
+build/
+next-env.d.ts
+
+# prisma (cliente generado — se regenera con `pnpm db:generate`)
+src/generated/
+
+# env
+.env
+.env.*
+!.env.example
+
+# runtime
+var/
+*.log
+
+# test
+coverage/
+
+# tooling
+*.tsbuildinfo
+.eslintcache
+
+# os / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

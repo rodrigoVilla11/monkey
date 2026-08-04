@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Desarrollo local.
+#
+# Levanta solo las dependencias (Postgres + servidor de mail). La app se corre
+# en el host con `pnpm dev`: hot reload instantáneo y sin pelear con los
+# bind mounts de node_modules en Windows.
+#
+#   docker compose up -d
+#   pnpm db:migrate
+#   pnpm dev
+#
+# Mailpit captura todos los mails salientes (verificación, invitaciones, reset)
+# y los muestra en http://localhost:8025 — no se manda nada real.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: monkey
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    container_name: monkey-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: monkey
+      POSTGRES_PASSWORD: monkey
+      POSTGRES_DB: monkey
+      # Colación determinista: evita que el orden de los índices dependa del
+      # locale del host (Windows vs Linux ordenan distinto por defecto).
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=und-x-icu"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monkey -d monkey"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Base separada para `pnpm test:integration`, así los tests pueden borrar
+  # todo entre corridas sin tocar tus datos de desarrollo.
+  postgres-test:
+    image: postgres:17-bookworm
+    container_name: monkey-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: monkey
+      POSTGRES_PASSWORD: monkey
+      POSTGRES_DB: monkey_test
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=und-x-icu"
+    ports:
+      - "5433:5432"
+    tmpfs:
+      # En RAM: los tests de integración vuelan y no dejan basura en disco.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monkey -d monkey_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: monkey-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # interfaz web
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  postgres-data:

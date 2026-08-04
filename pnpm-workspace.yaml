@@ -1,0 +1,11 @@
+# pnpm 11 ya no lee la clave "pnpm" de package.json: la configuración vive acá.
+#
+# pnpm bloquea por defecto los scripts de instalación (mitigación de supply
+# chain). Acá se declara, uno por uno, cuáles tienen permiso y por qué.
+allowBuilds:
+  "@prisma/engines": true # schema engine que usa `prisma migrate`
+  "@tailwindcss/oxide": true # binario nativo del compilador de Tailwind 4
+  esbuild: true # lo usan vitest y tsx
+  prisma: true # postinstall del CLI
+  sharp: true # optimización de imágenes de Next
+  unrs-resolver: true # resolver de imports de eslint-plugin-import

@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Producción en el VPS.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Postgres NO publica puertos al host: solo se llega desde la red interna.
+# Poné un reverse proxy (Caddy/Traefik/nginx) delante de `app` para el TLS,
+# porque APP_URL tiene que ser https (lo exige src/env.ts).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: monkey-prod
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?falta POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-monkey}
+      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=und-x-icu"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-monkey}?schema=public
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # Adjuntos con STORAGE_DRIVER=local (Fase 3). Cuando esto pase a S3/R2 el
+      # volumen se puede sacar sin tocar código: está detrás de una interfaz.
+      - uploads:/app/var/uploads
+    # Las migraciones se aplican antes de servir tráfico. `migrate deploy` solo
+    # aplica migraciones ya versionadas: nunca genera ni infiere nada.
+    command: >
+      sh -c "node_modules/.bin/prisma migrate deploy && node server.js"
+
+volumes:
+  postgres-data:
+  uploads:
