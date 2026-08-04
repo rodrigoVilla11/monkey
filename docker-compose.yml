@@ -28,7 +28,9 @@ services:
       # locale del host (Windows vs Linux ordenan distinto por defecto).
       POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=und-x-icu"
     ports:
-      - "5432:5432"
+      # 5442, no 5432: esta máquina ya tiene otros Postgres de otros proyectos
+      # ocupando los puertos habituales.
+      - "5442:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -49,7 +51,7 @@ services:
       POSTGRES_DB: monkey_test
       POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=und-x-icu"
     ports:
-      - "5433:5432"
+      - "5443:5432"
     tmpfs:
       # En RAM: los tests de integración vuelan y no dejan basura en disco.
       - /var/lib/postgresql/data

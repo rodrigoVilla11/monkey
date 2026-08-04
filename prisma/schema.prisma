@@ -1,0 +1,691 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Monkey — esquema de datos
+//
+// Invariantes de todo el dominio financiero:
+//  · Toda entidad financiera cuelga de `spaceId`. Sin excepciones salvo
+//    ExchangeRate, que es global y está en el allowlist de la extensión.
+//  · Nada de floats para dinero: BigInt en la unidad mínima de la moneda,
+//    con su `currency` ISO 4217 al lado.
+//  · Los importes se guardan SIEMPRE positivos; el signo lo determina el
+//    `type` de la transacción.
+//  · Las fechas de hecho económico son @db.Date (fecha calendario, sin hora
+//    ni timezone). Los instantes de sistema son DateTime (timestamptz).
+//  · Los tokens se guardan hasheados. Nunca en texto plano.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+/// Prisma 7 sacó `url` del schema: la URL para Migrate vive en prisma.config.ts
+/// y el cliente en runtime se conecta con un driver adapter (@prisma/adapter-pg).
+datasource db {
+  provider = "postgresql"
+}
+
+// ══════════════════════════════════ enums ═══════════════════════════════════
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum VerificationType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum ThemePreference {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
+enum AccountType {
+  CASH
+  BANK
+  CREDIT_CARD
+  INVESTMENT
+  CRYPTO
+  OTHER
+}
+
+enum CategoryKind {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  CLEARED
+}
+
+enum BudgetPeriod {
+  MONTHLY
+  WEEKLY
+  CUSTOM
+}
+
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum DebtDirection {
+  OWED_TO_ME
+  OWED_BY_ME
+}
+
+enum AuditAction {
+  SPACE_CREATED
+  SPACE_UPDATED
+  SPACE_DELETED
+  SPACE_OWNERSHIP_TRANSFERRED
+  MEMBER_INVITED
+  INVITATION_REVOKED
+  INVITATION_ACCEPTED
+  MEMBER_ROLE_CHANGED
+  MEMBER_REMOVED
+  MEMBER_LEFT
+  ACCOUNT_CREATED
+  ACCOUNT_UPDATED
+  ACCOUNT_DELETED
+  ACCOUNT_ARCHIVED
+  CATEGORY_DELETED
+  TRANSACTIONS_BULK_DELETED
+}
+
+// ═══════════════════════════ identidad y acceso ═════════════════════════════
+
+model User {
+  id           String  @id @default(cuid(2))
+  /// Siempre normalizado (lowercase + trim) por normalizeEmail(). Eso da la
+  /// unicidad case-insensitive sin necesitar la extensión citext.
+  email        String  @unique
+  passwordHash String
+  name         String
+  avatarUrl    String?
+
+  /// Se proponen desde DEFAULT_LOCALE / DEFAULT_TIMEZONE, pero cada persona
+  /// tiene los suyos: en un Space compartido puede haber gente en husos
+  /// distintos.
+  timezone String
+  locale   String
+
+  emailVerifiedAt DateTime?
+
+  // preferencias
+  theme        ThemePreference @default(SYSTEM)
+  /// 0 = domingo … 6 = sábado. Afecta reportes semanales y presupuestos WEEKLY.
+  weekStartsOn Int             @default(1)
+
+  // seguridad
+  /// Rate limiting por email que sobrevive a un redeploy (el de IP es en memoria).
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+  /// Revocación dura: invalida todo access token emitido antes de esta marca.
+  /// Se usa en el reset de password, donde no se puede esperar al TTL.
+  sessionsRevokedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  memberships         Membership[]          @relation("MembershipUser")
+  invitedMemberships  Membership[]          @relation("MembershipInviter")
+  refreshTokens       RefreshToken[]
+  verificationTokens  VerificationToken[]
+  sentInvitations     Invitation[]          @relation("InvitationInviter")
+  acceptedInvitations Invitation[]          @relation("InvitationAcceptor")
+  auditLogs           AuditLog[]
+  transactions        Transaction[]
+  recurringRules      RecurringRule[]
+  attachments         Attachment[]
+
+  @@index([deletedAt])
+}
+
+model Space {
+  id String @id @default(cuid(2))
+
+  name String
+  /// Moneda de consolidación de reportes. Cada transacción guarda además su
+  /// propia moneda y, si difiere, el tipo de cambio congelado.
+  primaryCurrency String @db.Char(3)
+  timezone        String
+  icon            String?
+  color           String?
+
+  /// El Space que se crea solo al registrarse. No se puede borrar si es el
+  /// único que le queda al usuario.
+  isPersonal Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  memberships     Membership[]
+  invitations     Invitation[]
+  auditLogs       AuditLog[]
+  accounts        Account[]
+  categories      Category[]
+  transactions    Transaction[]
+  tags            Tag[]
+  transactionTags TransactionTag[]
+  budgets         Budget[]
+  recurringRules  RecurringRule[]
+  savingsGoals    SavingsGoal[]
+  savingsContribs SavingsContribution[]
+  debts           Debt[]
+  debtPayments    DebtPayment[]
+  attachments     Attachment[]
+
+  @@index([deletedAt])
+}
+
+model Membership {
+  id      String         @id @default(cuid(2))
+  userId  String
+  spaceId String
+  role    MembershipRole
+
+  joinedAt        DateTime @default(now())
+  invitedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User  @relation("MembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  space     Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  invitedBy User? @relation("MembershipInviter", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  /// Este unique ya provee el índice (userId, spaceId) que pide el brief.
+  @@unique([userId, spaceId])
+  @@index([spaceId, role])
+}
+
+model Invitation {
+  id      String         @id @default(cuid(2))
+  spaceId String
+  /// Normalizado igual que User.email.
+  email   String
+  role    MembershipRole
+
+  /// sha256 del token. El token en claro solo existe en el mail que se manda.
+  tokenHash String    @unique
+  expiresAt DateTime
+  acceptedAt DateTime?
+  revokedAt  DateTime?
+
+  invitedByUserId  String?
+  acceptedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space      Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  invitedBy  User? @relation("InvitationInviter", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+  acceptedBy User? @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, email])
+  @@index([email, acceptedAt])
+  /// "una sola invitación pendiente por (spaceId, email)" es un unique PARCIAL:
+  /// Prisma no lo expresa, va a mano en la migración inicial.
+}
+
+model RefreshToken {
+  id     String @id @default(cuid(2))
+  userId String
+
+  tokenHash String @unique
+
+  deviceLabel String?
+  userAgent   String?
+  /// Hasheada: sirve para detectar anomalías sin guardar la IP en claro.
+  ipHash      String?
+
+  expiresAt DateTime
+  revokedAt DateTime?
+  /// Rotación: apunta al token que reemplazó a este. Si alguien presenta un
+  /// token ya rotado, es reuso → se revoca toda la familia.
+  replacedByTokenId String?
+  lastUsedAt        DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+model VerificationToken {
+  id     String @id @default(cuid(2))
+  userId String
+
+  tokenHash String           @unique
+  type      VerificationType
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, usedAt])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id String @id @default(cuid(2))
+
+  /// Null en eventos de cuenta que no pertenecen a ningún Space
+  /// (cambio de password, por ejemplo).
+  spaceId     String?
+  actorUserId String?
+  /// Respaldo: si se borra el usuario, el log sigue diciendo quién fue.
+  actorName   String
+
+  action     AuditAction
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipHash     String?
+
+  createdAt DateTime @default(now())
+
+  space Space? @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  actor User?  @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, createdAt])
+  @@index([spaceId, entityType, entityId])
+}
+
+// ═════════════════════════════ dominio financiero ═══════════════════════════
+
+model Account {
+  id      String @id @default(cuid(2))
+  spaceId String
+
+  name     String
+  type     AccountType
+  currency String      @db.Char(3)
+
+  /// Saldo de apertura. El saldo actual NO se guarda: se calcula sumando las
+  /// transacciones. Ver BalanceProvider.
+  initialBalanceMinor BigInt @default(0)
+
+  color      String?
+  icon       String?
+  sortOrder  Int     @default(0)
+  isArchived Boolean @default(false)
+
+  /// Solo para CREDIT_CARD. Rango 1..31 forzado por CHECK en la migración.
+  creditClosingDay Int?
+  creditDueDay     Int?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space          Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  recurringRules RecurringRule[]
+  savingsGoals   SavingsGoal[]
+  debts          Debt[]
+
+  @@index([spaceId, isArchived, deletedAt])
+  @@index([spaceId, sortOrder])
+}
+
+model Category {
+  id       String  @id @default(cuid(2))
+  spaceId  String
+  /// Jerarquía de máximo 2 niveles: una categoría con parentId no puede tener
+  /// hijas. Se valida en el service, el esquema no lo puede expresar.
+  parentId String?
+
+  name      String
+  kind      CategoryKind
+  icon      String?
+  color     String?
+  sortOrder Int          @default(0)
+  /// Viene del catálogo por defecto que se siembra al crear el Space.
+  isSystem  Boolean      @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space          Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  parent         Category?       @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children       Category[]      @relation("CategoryTree")
+  transactions   Transaction[]
+  budgets        Budget[]
+  recurringRules RecurringRule[]
+
+  @@index([spaceId, kind, deletedAt])
+  @@index([spaceId, parentId])
+}
+
+model Transaction {
+  id        String  @id @default(cuid(2))
+  spaceId   String
+  accountId String
+  categoryId String?
+
+  /// SetNull al borrar el usuario para no dejar transacciones huérfanas;
+  /// createdByName conserva el dato para siempre.
+  createdByUserId String?
+  createdByName   String
+
+  type   TransactionType
+  status TransactionStatus @default(CLEARED)
+
+  /// SIEMPRE positivo. El signo lo da `type`. Un CHECK lo garantiza.
+  amountMinor BigInt
+  currency    String @db.Char(3)
+
+  /// Congelados al crear la transacción. Un reporte histórico nunca se
+  /// recalcula con la cotización de hoy.
+  exchangeRateSnapshot Decimal? @db.Decimal(24, 12)
+  /// amountMinor ya convertido a Space.primaryCurrency. Denormalizado a
+  /// propósito: permite sumar reportes en SQL sin joins ni conversiones.
+  amountPrimaryMinor   BigInt?
+
+  /// Fecha calendario del hecho económico. Sin hora ni timezone: "lo gasté
+  /// el 3 de agosto" es un hecho local, no un instante.
+  date        DateTime @db.Date
+  description String?
+  notes       String?
+  payee       String?
+
+  /// Las transferencias son un par de transacciones con el mismo grupo.
+  transferGroupId String?
+  recurringRuleId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space         Space          @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  account       Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdBy     User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  recurringRule RecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
+
+  tags            TransactionTag[]
+  attachments     Attachment[]
+  savingsContribs SavingsContribution[]
+  debtPayments    DebtPayment[]
+
+  @@index([spaceId, date, deletedAt])
+  @@index([accountId, date])
+  @@index([spaceId, categoryId, date])
+  @@index([spaceId, createdByUserId, date])
+  @@index([spaceId, transferGroupId])
+  @@index([recurringRuleId])
+}
+
+model Tag {
+  id      String  @id @default(cuid(2))
+  spaceId String
+  name    String
+  color   String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space        Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  transactions TransactionTag[]
+
+  @@index([spaceId, deletedAt])
+  /// (spaceId, name) único entre los no borrados: unique parcial en la migración.
+}
+
+model TransactionTag {
+  transactionId String
+  tagId         String
+  /// Denormalizado a propósito: mantiene el invariante "toda tabla de dominio
+  /// tiene spaceId", así la extensión de scope no necesita excepciones.
+  spaceId       String
+
+  createdAt DateTime @default(now())
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tag         Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  space       Space       @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+  @@index([spaceId, tagId])
+}
+
+model Budget {
+  id      String  @id @default(cuid(2))
+  spaceId String
+  /// Null = presupuesto global del Space.
+  categoryId String?
+
+  name        String
+  period      BudgetPeriod
+  amountMinor BigInt
+  currency    String       @db.Char(3)
+
+  startDate DateTime  @db.Date
+  /// Obligatoria si period = CUSTOM (CHECK en la migración).
+  endDate   DateTime? @db.Date
+
+  rollover Boolean @default(false)
+  isActive Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space    Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([spaceId, isActive, deletedAt])
+  @@index([spaceId, categoryId])
+}
+
+model RecurringRule {
+  id        String  @id @default(cuid(2))
+  spaceId   String
+  accountId String
+  categoryId String?
+
+  createdByUserId String?
+  createdByName   String
+
+  type        TransactionType
+  amountMinor BigInt
+  currency    String          @db.Char(3)
+  description String?
+  payee       String?
+
+  // RRULE simplificado
+  frequency  RecurrenceFrequency
+  interval   Int                 @default(1)
+  /// MONTHLY / YEARLY: día del mes (1..31)
+  byMonthDay Int?
+  /// WEEKLY: 0 = domingo … 6 = sábado
+  byWeekday  Int?
+  /// YEARLY: 1..12
+  byMonth    Int?
+
+  startDate      DateTime  @db.Date
+  endDate        DateTime? @db.Date
+  maxOccurrences Int?
+
+  nextRunDate        DateTime  @db.Date
+  lastRunAt          DateTime?
+  occurrencesCreated Int       @default(0)
+  /// true = las transacciones nacen CLEARED; false = PENDING para revisar.
+  autoPost           Boolean   @default(true)
+  isActive           Boolean   @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space     Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  account   Account       @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category  Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdBy User?         @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  transactions Transaction[]
+
+  @@index([spaceId, isActive, nextRunDate])
+  /// Barrido global del job de materialización, que cruza todos los Spaces.
+  @@index([isActive, nextRunDate])
+}
+
+model SavingsGoal {
+  id        String  @id @default(cuid(2))
+  spaceId   String
+  accountId String?
+
+  name              String
+  targetAmountMinor BigInt
+  currency          String    @db.Char(3)
+  targetDate        DateTime? @db.Date
+  icon              String?
+  color             String?
+  achievedAt        DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space         Space                 @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  account       Account?              @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  contributions SavingsContribution[]
+
+  @@index([spaceId, deletedAt])
+}
+
+model SavingsContribution {
+  id      String @id @default(cuid(2))
+  spaceId String
+  goalId  String
+  /// Opcional: un aporte puede o no corresponder a una transacción real.
+  transactionId String?
+
+  amountMinor BigInt
+  date        DateTime @db.Date
+  note        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space       Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  goal        SavingsGoal  @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, goalId, date])
+}
+
+model Debt {
+  id        String  @id @default(cuid(2))
+  spaceId   String
+  accountId String?
+
+  direction    DebtDirection
+  counterparty String
+  description  String?
+
+  originalAmountMinor BigInt
+  currency            String @db.Char(3)
+  /// Basis points (1% = 100). Entero, para no meter floats ni acá.
+  interestRateBps     Int?
+
+  startDate         DateTime  @db.Date
+  dueDate           DateTime? @db.Date
+  installmentsTotal Int?
+  closedAt          DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space    Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  account  Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  payments DebtPayment[]
+
+  /// El saldo NO se guarda: es originalAmountMinor - sum(payments).
+  @@index([spaceId, closedAt, deletedAt])
+}
+
+model DebtPayment {
+  id      String @id @default(cuid(2))
+  spaceId String
+  debtId  String
+  transactionId String?
+
+  amountMinor   BigInt
+  date          DateTime @db.Date
+  installmentNo Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space       Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  debt        Debt         @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, debtId, date])
+}
+
+/// ⚠️ La ÚNICA tabla del dominio sin spaceId: las cotizaciones son globales.
+/// Está explícitamente en el allowlist de la extensión de scope.
+model ExchangeRate {
+  id String @id @default(cuid(2))
+
+  baseCurrency  String   @db.Char(3)
+  quoteCurrency String   @db.Char(3)
+  date          DateTime @db.Date
+  rate          Decimal  @db.Decimal(24, 12)
+  /// "manual" en Fase 1. Deja lugar a "ecb", "bcra", etc. sin migrar.
+  source        String   @default("manual")
+
+  createdAt DateTime @default(now())
+
+  @@unique([baseCurrency, quoteCurrency, date, source])
+  @@index([baseCurrency, quoteCurrency, date])
+}
+
+model Attachment {
+  id            String @id @default(cuid(2))
+  spaceId       String
+  transactionId String
+
+  /// Clave opaca del storage. La URL la firma el driver; nunca se guarda.
+  storageKey       String
+  mimeType         String
+  sizeBytes        Int
+  originalName     String
+  uploadedByUserId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  space       Space       @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  uploadedBy  User?       @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, transactionId])
+}

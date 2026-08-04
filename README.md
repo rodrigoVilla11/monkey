@@ -15,7 +15,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | Incremento                       | Estado |
 | -------------------------------- | ------ |
 | 1 · Configuración del proyecto   | ✅     |
-| 2 · Esquema Prisma y migraciones | ⏳     |
+| 2 · Esquema Prisma y migraciones | ✅     |
 | 3 · Capa de datos scopeada       | ⏳     |
 | 4 · Auth y sesiones              | ⏳     |
 | 5 · Spaces y membresías          | ⏳     |
@@ -75,8 +75,8 @@ pnpm dev
 | ---------------- | --------------------- |
 | App              | http://localhost:3000 |
 | Mailpit (mails)  | http://localhost:8025 |
-| Postgres (dev)   | `localhost:5432`      |
-| Postgres (tests) | `localhost:5433`      |
+| Postgres (dev)   | `localhost:5442`      |
+| Postgres (tests) | `localhost:5443`      |
 
 Los mails de verificación, invitación y reset **no salen a internet** en
 desarrollo: los captura Mailpit y los ves en su interfaz web.
