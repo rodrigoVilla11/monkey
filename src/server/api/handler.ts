@@ -8,8 +8,11 @@ import {
   type AuthenticatedSession,
 } from "@/server/auth/session";
 import { requestLogger } from "@/server/logger";
+import { forSpace, type ScopedDb } from "@/server/db/scoped";
 import { SpaceScopeError } from "@/server/db/space-scope";
+import type { MembershipRole } from "@/shared/roles";
 
+import { requireSpaceAccess, type SpaceAccess } from "./authorize";
 import { ApiError, errors } from "./errors";
 import { clientIp, rateLimiter } from "./rate-limit";
 import { json } from "./responses";
@@ -44,6 +47,19 @@ export interface AuthedRouteContext<TBody, TParams> extends RouteContext<
   readonly session: AuthenticatedSession;
 }
 
+export interface SpaceRouteContext<TBody, TParams> extends AuthedRouteContext<
+  TBody,
+  TParams
+> {
+  /** userId, spaceId y rol, ya verificados contra Membership. */
+  readonly access: SpaceAccess;
+  /**
+   * Cliente de base de datos acotado a este Space. Usar SIEMPRE este y no
+   * `forSpace()` a mano: garantiza que el spaceId sea el que se autorizó.
+   */
+  readonly db: ScopedDb;
+}
+
 interface RouteOptions<TBody, TParams> {
   /** Esquema del body. Si no se pasa, el body no se lee. */
   readonly body?: ZodType<TBody>;
@@ -57,6 +73,18 @@ interface RouteOptions<TBody, TParams> {
    * puede entrar y ver la pantalla de "verificá tu mail", nada más.
    */
   readonly verified?: boolean;
+  /**
+   * Endpoint acotado a un Space. Declarar esto:
+   *  · exige `auth` y `verified` implícitamente
+   *  · exige que `params` traiga un `spaceId`
+   *  · resuelve la membresía y corta con 404 si no sos miembro, o con 403 si
+   *    tu rol no llega a `minRole`
+   *  · inyecta `access` y `db` (ya scopeado) en el contexto
+   *
+   * Está acá y no en cada handler a propósito: así es IMPOSIBLE escribir un
+   * endpoint de Space sin declarar qué rol hace falta.
+   */
+  readonly space?: { readonly minRole: MembershipRole };
   readonly rateLimit?: {
     readonly limit: number;
     readonly windowSeconds: number;
@@ -70,6 +98,16 @@ type Handler<TBody, TParams> = (
 type AuthedHandler<TBody, TParams> = (
   context: AuthedRouteContext<TBody, TParams>,
 ) => Promise<NextResponse>;
+
+type SpaceHandler<TBody, TParams> = (
+  context: SpaceRouteContext<TBody, TParams>,
+) => Promise<NextResponse>;
+
+/** Los params de un endpoint de Space tienen que traer el spaceId del path. */
+const hasSpaceId = (value: unknown): value is { spaceId: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { spaceId?: unknown }).spaceId === "string";
 
 /** Lo que Next entrega como segundo argumento de un Route Handler. */
 interface NextRouteArgs {
@@ -115,21 +153,37 @@ type RouteEntry = (
 ) => Promise<NextResponse>;
 
 /**
- * Sobrecargas: con `auth: true` el handler recibe `session` garantizada; sin
- * auth, no existe. Sin esto TypeScript no puede inferir el tipo del contexto
- * a partir de una unión y todos los handlers quedarían implícitamente `any`.
+ * Sobrecargas: con `space` el handler recibe `access` y `db`; con `auth: true`
+ * recibe `session`; sin nada, ninguno de los tres. Sin estas firmas TypeScript
+ * no puede inferir el contexto a partir de una unión y todos los handlers
+ * quedarían implícitamente `any`.
  */
 export function route<TBody = undefined, TParams = undefined>(
-  options: RouteOptions<TBody, TParams> & { auth: true },
+  options: RouteOptions<TBody, TParams> & {
+    space: { minRole: MembershipRole };
+  },
+  handler: SpaceHandler<TBody, TParams>,
+): RouteEntry;
+export function route<TBody = undefined, TParams = undefined>(
+  options: RouteOptions<TBody, TParams> & {
+    auth: true;
+    space?: undefined;
+  },
   handler: AuthedHandler<TBody, TParams>,
 ): RouteEntry;
 export function route<TBody = undefined, TParams = undefined>(
-  options: RouteOptions<TBody, TParams> & { auth?: false | undefined },
+  options: RouteOptions<TBody, TParams> & {
+    auth?: false | undefined;
+    space?: undefined;
+  },
   handler: Handler<TBody, TParams>,
 ): RouteEntry;
 export function route<TBody = undefined, TParams = undefined>(
   options: RouteOptions<TBody, TParams>,
-  handler: Handler<TBody, TParams> | AuthedHandler<TBody, TParams>,
+  handler:
+    | Handler<TBody, TParams>
+    | AuthedHandler<TBody, TParams>
+    | SpaceHandler<TBody, TParams>,
 ): RouteEntry {
   return async (
     request: NextRequest,
@@ -196,23 +250,52 @@ export function route<TBody = undefined, TParams = undefined>(
         ip,
       };
 
-      if (options.auth !== true) {
+      const needsAuth = options.auth === true || options.space !== undefined;
+      if (!needsAuth) {
         return await (handler as Handler<TBody, TParams>)(base);
       }
 
       const session = await resolveSession(request);
       if (session === null) throw errors.unauthenticated();
 
-      if (options.verified === true && !session.emailVerified) {
+      // Un endpoint de Space siempre exige email verificado: una cuenta sin
+      // verificar puede ver su perfil y poco más.
+      const needsVerified =
+        options.verified === true || options.space !== undefined;
+      if (needsVerified && !session.emailVerified) {
         throw errors.emailNotVerified();
       }
 
       const authedLog = log.child({ userId: session.userId });
 
-      return await (handler as AuthedHandler<TBody, TParams>)({
+      if (options.space === undefined) {
+        return await (handler as AuthedHandler<TBody, TParams>)({
+          ...base,
+          logger: authedLog,
+          session,
+        });
+      }
+
+      if (!hasSpaceId(params)) {
+        // Error de programación, no del cliente: se declaró `space` pero el
+        // esquema de params no trae spaceId.
+        throw new Error(
+          "Un endpoint con `space` necesita un `params` que incluya spaceId",
+        );
+      }
+
+      const access = await requireSpaceAccess(
+        session.userId,
+        params.spaceId,
+        options.space.minRole,
+      );
+
+      return await (handler as SpaceHandler<TBody, TParams>)({
         ...base,
-        logger: authedLog,
+        logger: authedLog.child({ spaceId: access.spaceId, role: access.role }),
         session,
+        access,
+        db: forSpace(access.spaceId),
       });
     } catch (error) {
       return toResponse(error, log);

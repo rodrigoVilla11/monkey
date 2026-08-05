@@ -7,8 +7,7 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
-    // `seed` se agrega en el incremento 4: unas fixtures de desarrollo útiles
-    // necesitan usuarios, y para eso hace falta el hash de passwords.
+    seed: "tsx prisma/seed.ts",
   },
   datasource: {
     /**

@@ -96,6 +96,39 @@ export const passwordResetTemplate = (
   ].join("\n"),
 });
 
+const ROLE_LABEL: Readonly<Record<string, string>> = {
+  ADMIN: "administrador",
+  MEMBER: "miembro",
+  VIEWER: "solo lectura",
+};
+
+export const invitationTemplate = (
+  inviterName: string,
+  spaceName: string,
+  role: string,
+  url: string,
+  days: number,
+): Omit<MailMessage, "to"> => ({
+  subject: `${inviterName} te invitó a ${spaceName} · Monkey`,
+  html: layout(
+    `Te invitaron a ${spaceName}`,
+    `<strong>${escapeHtml(inviterName)}</strong> te invitó a compartir el espacio ` +
+      `<strong>${escapeHtml(spaceName)}</strong> en Monkey, con permisos de ` +
+      `${escapeHtml(ROLE_LABEL[role] ?? role)}.<br><br>` +
+      `La invitación vence en ${String(days)} días.`,
+    { label: "Ver invitación", url },
+  ),
+  text: [
+    `${inviterName} te invitó a compartir el espacio "${spaceName}" en Monkey,`,
+    `con permisos de ${ROLE_LABEL[role] ?? role}.`,
+    "",
+    url,
+    "",
+    `La invitación vence en ${String(days)} días.`,
+    "Si no esperabas esto, podés ignorar el mail.",
+  ].join("\n"),
+});
+
 export const passwordChangedTemplate = (
   name: string,
 ): Omit<MailMessage, "to"> => ({

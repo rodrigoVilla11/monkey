@@ -18,7 +18,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 2 · Esquema Prisma y migraciones | ✅     |
 | 3 · Capa de datos scopeada       | ✅     |
 | 4 · Auth y sesiones              | ✅     |
-| 5 · Spaces y membresías          | ⏳     |
+| 5 · Spaces y membresías          | ✅     |
 | 6 · Services de dominio y API v1 | ⏳     |
 | 7 · UI                           | ⏳     |
 | 8 · PWA                          | ⏳     |
@@ -100,6 +100,7 @@ desarrollo: los captura Mailpit y los ves en su interfaz web.
 | `pnpm db:migrate`       | Crea y aplica una migración en desarrollo                 |
 | `pnpm db:deploy`        | Aplica migraciones ya versionadas (producción)            |
 | `pnpm db:studio`        | Explorador visual de la base                              |
+| `pnpm db:seed`          | Datos de desarrollo: 3 usuarios y un Space compartido     |
 | `pnpm user:create`      | Crea el primer usuario (disponible desde el incremento 4) |
 
 > Nunca se usa `prisma db push`. Todos los cambios de esquema van por
@@ -247,6 +248,50 @@ que acepta las dos formas de manera transparente:
 - Contraseñas con **argon2id** (19 MiB, t=2). El login corre el hash incluso
   cuando el email no existe, para que el tiempo de respuesta no permita
   enumerar cuentas.
+
+### Autorización dentro de un Space
+
+Los endpoints acotados a un Space **declaran su rol mínimo en el propio
+`route()`**, y ahí se resuelve todo antes de llegar al handler:
+
+```ts
+export const PATCH = route<UpdateSpaceRequest, Params>(
+  { body: schema, params: paramsSchema, space: { minRole: "ADMIN" } },
+  async ({ body, access, db }) => {
+    /* access y db ya están acotados */
+  },
+);
+```
+
+Declarar `space` obliga a que `params` traiga un `spaceId`, exige sesión con
+email verificado, resuelve la membresía y entrega un `db` ya scopeado. **No hay
+forma de escribir un endpoint de Space sin declarar qué rol hace falta.**
+
+| Rol      | Puede                                                      |
+| -------- | ---------------------------------------------------------- |
+| `OWNER`  | Todo, incluido eliminar el Space y transferir la propiedad |
+| `ADMIN`  | Todo salvo eliminar el Space o gestionar al OWNER          |
+| `MEMBER` | Cuentas, categorías y movimientos. No gestiona miembros    |
+| `VIEWER` | Solo lectura                                               |
+
+**404, nunca 403, si no sos miembro.** Un 403 confirmaría que el Space existe.
+El 403 (`INSUFFICIENT_ROLE`) se reserva para cuando sí sos miembro pero tu rol
+no alcanza — ahí ya sabés que existe, así que no se filtra nada nuevo.
+
+### El manifiesto de rutas
+
+[`routes.manifest.ts`](src/server/api/routes.manifest.ts) declara cada endpoint
+con su método, autenticación y rol mínimo. De ahí salen tres tests:
+
+1. **[`routes-manifest.test.ts`](src/tests/arch/routes-manifest.test.ts)** recorre
+   `app/api/**` y falla si hay un `route.ts` que no esté declarado.
+2. **[`role-matrix.test.ts`](src/tests/integration/role-matrix.test.ts)** prueba
+   cada endpoint acotado a Space contra cada rol.
+3. La prueba de aislamiento usa el mismo inventario.
+
+El primero es el que sostiene a los otros dos: **si agregás un endpoint y te
+olvidás de registrarlo, la suite falla** — y por lo tanto ningún endpoint puede
+quedar fuera de la matriz de permisos sin que alguien se entere.
 
 ### Convenciones de dominio
 

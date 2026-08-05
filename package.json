@@ -24,6 +24,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset",
     "user:create": "tsx scripts/create-first-user.ts",
     "pwa:assets": "tsx scripts/generate-pwa-assets.ts",
