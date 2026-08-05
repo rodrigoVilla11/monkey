@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { BudgetSummary } from "./budgets";
 import { calendarDateSchema, type MoneyDTO } from "./common";
 
 /**
@@ -81,4 +82,6 @@ export interface DashboardResponse {
   readonly topExpenseCategories: readonly CategoryBreakdownItem[];
   /** Solo en Spaces compartidos; en los personales viene vacío. */
   readonly byMember: readonly MemberBreakdownItem[];
+  /** Resumen de presupuestos. `total: 0` si todavía no hay ninguno. */
+  readonly budgets: BudgetSummary;
 }

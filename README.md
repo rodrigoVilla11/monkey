@@ -23,10 +23,18 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 7 · UI                           | ✅     |
 | 8 · PWA                          | ✅     |
 
-**Fase 1 completa.** Las fases 2 y 3 del brief (presupuestos, reportes,
-transferencias, recurrentes, metas, deudas, importación y adjuntos) no están
-implementadas: el esquema ya las contempla y los puntos de extensión están
-puestos, pero no hay código muerto esperándolas.
+**Fase 1 completa.**
+
+| Fase 2 — Análisis y control | Estado |
+| --------------------------- | ------ |
+| 9 · Presupuestos            | ✅     |
+| 10 · Reportes               | ⏳     |
+| 11 · Transferencias         | ⏳     |
+| 12 · Recurrentes + cron     | ⏳     |
+
+La Fase 3 (metas, deudas, importación, exportación, adjuntos y división de
+gastos) no está implementada: el esquema ya la contempla y los puntos de
+extensión están puestos, pero no hay código muerto esperándola.
 
 ---
 

@@ -1,5 +1,6 @@
 import type { ScopedDb } from "@/server/db/scoped";
 import { accountBalances } from "@/server/services/balances";
+import { budgetSummary } from "@/server/services/budgets";
 import { getRateProvider } from "@/server/services/rates";
 import { percentageOf } from "@/shared/balance";
 import type { MoneyDTO } from "@/shared/contracts/common";
@@ -288,15 +289,23 @@ export const getDashboard = async (
   const current = monthRange(anchor);
   const previous = monthRange(addMonths(anchor, -1));
 
-  const [summary, previousSummary, netWorth, accounts, topCategories, members] =
-    await Promise.all([
-      summarize(db, current, space.primaryCurrency),
-      summarize(db, previous, space.primaryCurrency),
-      computeNetWorth(db, space.primaryCurrency, today),
-      accountSummaries(db),
-      topExpenseCategories(db, current, space.primaryCurrency, 6),
-      byMember(db, current, space.primaryCurrency),
-    ]);
+  const [
+    summary,
+    previousSummary,
+    netWorth,
+    accounts,
+    topCategories,
+    members,
+    budgets,
+  ] = await Promise.all([
+    summarize(db, current, space.primaryCurrency),
+    summarize(db, previous, space.primaryCurrency),
+    computeNetWorth(db, space.primaryCurrency, today),
+    accountSummaries(db),
+    topExpenseCategories(db, current, space.primaryCurrency, 6),
+    byMember(db, current, space.primaryCurrency),
+    budgetSummary(db, viewerTimezone, space.primaryCurrency),
+  ]);
 
   return {
     primaryCurrency: space.primaryCurrency,
@@ -306,6 +315,7 @@ export const getDashboard = async (
     accounts,
     topExpenseCategories: topCategories,
     byMember: members,
+    budgets,
   };
 };
 

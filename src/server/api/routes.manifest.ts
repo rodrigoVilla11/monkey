@@ -324,6 +324,39 @@ export const ROUTES: readonly RouteSpec[] = [
     minRole: "MEMBER",
   },
 
+  // ── presupuestos ─────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/budgets",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/budgets",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/budgets/[budgetId]",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/budgets/[budgetId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/budgets/[budgetId]",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Borrado lógico: no toca ningún movimiento, por eso alcanza MEMBER",
+  },
+
   // ── dashboard ────────────────────────────────────────────────────────────
   {
     method: "GET",

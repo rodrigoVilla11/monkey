@@ -1,7 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { TrendingDown, TrendingUp } from "lucide-react";
+import {
+  ChevronRight,
+  PiggyBank,
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 
 import { Card } from "@/components/ui/card";
@@ -132,6 +138,44 @@ export default function DashboardPage() {
           </p>
         </div>
       </Card>
+
+      {/* Presupuestos: solo aparece si hay alguno. Una tarjeta vacía
+          prometiendo una función es ruido. */}
+      {dashboard.data.budgets.total > 0 && (
+        <Link href="/budgets" className="block active:opacity-70">
+          <Card className="gap-2 p-4">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-sm font-semibold">
+                <PiggyBank className="size-4" />
+                Presupuestos
+              </span>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </div>
+
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {formatMoneyDTO(dashboard.data.budgets.totalSpent, locale)} de{" "}
+              {formatMoneyDTO(dashboard.data.budgets.totalAmount, locale)}
+            </p>
+
+            {(dashboard.data.budgets.overBudget > 0 ||
+              dashboard.data.budgets.nearLimit > 0) && (
+              <p
+                className={cn(
+                  "flex items-center gap-1.5 text-xs",
+                  dashboard.data.budgets.overBudget > 0
+                    ? "text-expense"
+                    : "text-amber-500",
+                )}
+              >
+                <TriangleAlert className="size-3.5 shrink-0" />
+                {dashboard.data.budgets.overBudget > 0
+                  ? `${String(dashboard.data.budgets.overBudget)} pasado${dashboard.data.budgets.overBudget > 1 ? "s" : ""} del límite`
+                  : `${String(dashboard.data.budgets.nearLimit)} cerca del límite`}
+              </p>
+            )}
+          </Card>
+        </Link>
+      )}
 
       {/* Saldo por cuenta */}
       <section className="space-y-2">
