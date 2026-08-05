@@ -28,8 +28,10 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 ## Stack
 
 Next.js 16 (App Router) · TypeScript 6 estricto · PostgreSQL 17 + Prisma 7 ·
-Tailwind CSS 4 + shadcn/ui · Zod 4 · Auth.js v5 · TanStack Query · Vitest ·
-pnpm · Docker.
+Tailwind CSS 4 + shadcn/ui · Zod 4 · TanStack Query · Vitest · pnpm · Docker.
+
+Autenticación propia (argon2id + JWT con `jose`), no Auth.js — ver
+[Autenticación](#autenticación).
 
 **Requisito arquitectónico:** la API REST de `app/api/v1/**` es la fuente de
 verdad. El frontend web la consume por `fetch` como cualquier otro cliente, así
