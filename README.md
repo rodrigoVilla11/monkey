@@ -19,7 +19,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 3 · Capa de datos scopeada       | ✅     |
 | 4 · Auth y sesiones              | ✅     |
 | 5 · Spaces y membresías          | ✅     |
-| 6 · Services de dominio y API v1 | ⏳     |
+| 6 · Services de dominio y API v1 | ✅     |
 | 7 · UI                           | ⏳     |
 | 8 · PWA                          | ⏳     |
 

@@ -85,6 +85,18 @@ enum TransactionStatus {
   CLEARED
 }
 
+/// Lado de una transferencia. Una transferencia son DOS transacciones con el
+/// mismo transferGroupId: la que sale de una cuenta (OUT) y la que entra en la
+/// otra (IN).
+///
+/// Hace falta porque en el resto del dominio el signo lo determina `type`
+/// (INCOME suma, EXPENSE resta), pero las dos patas de una transferencia
+/// comparten el tipo TRANSFER y afectan al saldo en sentidos opuestos.
+enum TransferDirection {
+  OUT
+  IN
+}
+
 enum BudgetPeriod {
   MONTHLY
   WEEKLY
@@ -442,8 +454,11 @@ model Transaction {
   payee       String?
 
   /// Las transferencias son un par de transacciones con el mismo grupo.
-  transferGroupId String?
-  recurringRuleId String?
+  transferGroupId   String?
+  /// Solo en las patas de una transferencia. Un CHECK garantiza que vaya junto
+  /// con transferGroupId y solo cuando type = TRANSFER.
+  transferDirection TransferDirection?
+  recurringRuleId   String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

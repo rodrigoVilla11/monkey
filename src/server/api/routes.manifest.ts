@@ -193,6 +193,144 @@ export const ROUTES: readonly RouteSpec[] = [
     auth: "verified",
     minRole: "ADMIN",
   },
+
+  // ── cuentas ──────────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/accounts",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/accounts",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/accounts/[accountId]",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/accounts/[accountId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/accounts/[accountId]",
+    auth: "verified",
+    minRole: "ADMIN",
+    note: "Destructivo y auditado. Con movimientos responde 409: hay que archivar",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/accounts/[accountId]/archive",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+
+  // ── categorías ───────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/categories",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/categories",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/categories/[categoryId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/categories/[categoryId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+
+  // ── transacciones ────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/transactions",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/transactions",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/transactions/bulk-delete",
+    auth: "verified",
+    minRole: "ADMIN",
+    note: "La operación más destructiva del dominio: ADMIN y auditada",
+  },
+
+  // ── etiquetas ────────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/tags",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/tags",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/tags/[tagId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/tags/[tagId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+
+  // ── dashboard ────────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/dashboard",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
 ];
 
 /** Endpoints acotados a un Space: los que recorren la matriz de roles. */
