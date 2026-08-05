@@ -32,6 +32,14 @@ export default defineConfig({
     pool: "forks",
     fileParallelism: false,
     maxWorkers: 1,
+    /**
+     * @node-rs/argon2 es un binario nativo (.node). Si Vite intenta
+     * transformarlo, la resolución del binding falla; hay que dejar que lo
+     * cargue Node directamente.
+     */
+    server: {
+      deps: { external: [/@node-rs\/argon2/] },
+    },
     globalSetup: ["src/tests/integration/helpers/global-setup.ts"],
     env: {
       NODE_ENV: "test",

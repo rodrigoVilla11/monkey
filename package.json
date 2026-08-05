@@ -43,7 +43,6 @@
     "jose": "6.2.8",
     "lucide-react": "0.575.0",
     "next": "16.2.12",
-    "next-auth": "5.0.0-beta.32",
     "next-themes": "0.4.6",
     "nodemailer": "9.0.3",
     "pg": "^8.22.0",

@@ -17,7 +17,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 1 · Configuración del proyecto   | ✅     |
 | 2 · Esquema Prisma y migraciones | ✅     |
 | 3 · Capa de datos scopeada       | ✅     |
-| 4 · Auth y sesiones              | ⏳     |
+| 4 · Auth y sesiones              | ✅     |
 | 5 · Spaces y membresías          | ⏳     |
 | 6 · Services de dominio y API v1 | ⏳     |
 | 7 · UI                           | ⏳     |
@@ -224,6 +224,27 @@ Y una cuarta que evita que las tres se pudran:
 [`db-scope-coverage.test.ts`](src/tests/arch/db-scope-coverage.test.ts) lee
 `schema.prisma` y falla si un modelo nuevo queda sin clasificar o si una
 relación entre modelos scopeados no usa FK compuesta.
+
+### Autenticación
+
+Una sola resolución de sesión, [`resolveSession`](src/server/auth/session.ts),
+que acepta las dos formas de manera transparente:
+
+| Cliente | Credencial                  | Dónde viven los tokens                                    |
+| ------- | --------------------------- | --------------------------------------------------------- |
+| Web     | cookie httpOnly `monkey_at` | El navegador. JavaScript no puede leerlos                 |
+| Nativo  | `Authorization: Bearer`     | Llavero del sistema. Se piden con `X-Client-Type: native` |
+
+- **Access token**: JWT de 15 minutos, sin estado.
+- **Refresh token**: opaco, 60 días, guardado **hasheado** y **rotativo**. Si
+  llega uno ya rotado, se asume copia robada y se cierran todas las sesiones
+  del usuario.
+- **Revocación inmediata**: `User.sessionsRevokedAt` se compara con el `iat` de
+  cada access token, así "cerrar sesión en todos los dispositivos" y el reset
+  de contraseña surten efecto en el acto y no cuando expira el token.
+- Contraseñas con **argon2id** (19 MiB, t=2). El login corre el hash incluso
+  cuando el email no existe, para que el tiempo de respuesta no permita
+  enumerar cuentas.
 
 ### Convenciones de dominio
 

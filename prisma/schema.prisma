@@ -141,6 +141,12 @@ model User {
 
   emailVerifiedAt DateTime?
 
+  /// Último Space que la persona estaba usando. Es solo el default de la UI:
+  /// la autorización real sale siempre del spaceId de la URL contrastado con
+  /// Membership. Vive acá y no en el token para que sobreviva al refresh y se
+  /// comparta entre dispositivos.
+  activeSpaceId String?
+
   // preferencias
   theme        ThemePreference @default(SYSTEM)
   /// 0 = domingo … 6 = sábado. Afecta reportes semanales y presupuestos WEEKLY.
@@ -158,6 +164,7 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  activeSpace         Space?                @relation("UserActiveSpace", fields: [activeSpaceId], references: [id], onDelete: SetNull)
   memberships         Membership[]          @relation("MembershipUser")
   invitedMemberships  Membership[]          @relation("MembershipInviter")
   refreshTokens       RefreshToken[]
@@ -194,6 +201,9 @@ model Space {
   memberships     Membership[]
   invitations     Invitation[]
   auditLogs       AuditLog[]
+  /// Contra-lado de User.activeSpaceId. No implica permisos: solo recuerda
+  /// qué Space tenía abierto cada persona.
+  activeForUsers  User[]                @relation("UserActiveSpace")
   accounts        Account[]
   categories      Category[]
   transactions    Transaction[]
