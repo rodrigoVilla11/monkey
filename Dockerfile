@@ -46,6 +46,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm prisma generate
 RUN pnpm next build
 
+# El Service Worker se construye DESPUÉS de Next y en un paso aparte (modo
+# configurador de Serwist, ver serwist.config.ts): el manifiesto de precarga se
+# arma leyendo los archivos hasheados que dejó el build. Escribe public/sw.js,
+# que la etapa de runtime copia junto con el resto de `public/`.
+RUN pnpm serwist build serwist.config.ts
+
 # ── Stage 3: runtime ─────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION} AS runner
 WORKDIR /app

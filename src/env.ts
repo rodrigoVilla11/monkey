@@ -23,11 +23,44 @@ const isBuildPhase = (): boolean =>
   process.env.NEXT_PHASE === "phase-production-build" ||
   process.env.SKIP_ENV_VALIDATION === "true";
 
+/**
+ * Entorno para la fase de build.
+ *
+ * NO se devuelve `process.env` crudo: eso dejaría sin valor a todos los campos
+ * que dependen de un default del esquema, y cualquier módulo que se inicialice
+ * al importarse reventaría durante el build. (Pasó de verdad: pino tira
+ * "default level: undefined must be included in custom levels" si LOG_LEVEL no
+ * está.)
+ *
+ * En su lugar se parsea con el esquema completo —para que los defaults se
+ * apliquen— rellenando solo los obligatorios que falten, y forzando
+ * NODE_ENV=development para no disparar las reglas de producción sobre un
+ * entorno de build que por diseño no tiene secretos.
+ *
+ * Estos valores NUNCA sirven tráfico: en el arranque real se valida de verdad.
+ */
+const buildEnv = (): Env => {
+  const result = parseEnv({
+    ...process.env,
+    NODE_ENV: "development",
+    DATABASE_URL:
+      process.env.DATABASE_URL ?? "postgresql://build@localhost:5432/build",
+    AUTH_SECRET:
+      process.env.AUTH_SECRET ?? "placeholder-de-build-de-32-caracteres",
+  });
+
+  if (result.ok) return result.env;
+
+  // Llegar acá significa que el esquema cambió y estos rellenos ya no
+  // alcanzan. Mejor romper el build que generar un artefacto que no arranca.
+  throw new Error(
+    `El esquema de entorno no valida ni con los valores de build: ${result.errors.join("; ")}`,
+  );
+};
+
 const loadEnv = (): Env => {
   // La validación real pasa al arrancar el server, vía instrumentation.ts.
-  if (isBuildPhase()) {
-    return process.env as unknown as Env;
-  }
+  if (isBuildPhase()) return buildEnv();
 
   const result = parseEnv(process.env);
 

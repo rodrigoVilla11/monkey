@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { api } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
-import { purgeApiCaches } from "@/lib/sw-bridge";
+import { purgeApiCaches, setServiceWorkerUser } from "@/lib/sw-bridge";
 import type { SessionUser } from "@/shared/contracts/auth";
 import type { SpaceSummary } from "@/shared/contracts/spaces";
 
@@ -16,13 +16,26 @@ import type { SpaceSummary } from "@/shared/contracts/spaces";
  * así se comparte entre dispositivos y sobrevive a limpiar el navegador.
  */
 
-export const useSession = () =>
-  useQuery({
+export const useSession = () => {
+  const query = useQuery({
     queryKey: queryKeys.me,
-    queryFn: () => api.get<{ user: SessionUser }>("/me"),
+    queryFn: async () => {
+      const result = await api.get<{ user: SessionUser }>("/me");
+      /**
+       * Se le dice al Service Worker quién está usando la app. Con eso puede
+       * descartar cualquier respuesta que quedara cacheada por otra sesión —
+       * la red de seguridad para cuando el mensaje de purga no llegó porque el
+       * SW estaba dormido.
+       */
+      void setServiceWorkerUser(result.user.id);
+      return result;
+    },
     select: (data) => data.user,
     retry: false,
   });
+
+  return query;
+};
 
 export const useSpaces = () =>
   useQuery({
@@ -77,7 +90,9 @@ export const useSwitchSpace = () => {
     onSuccess: async (data) => {
       queryClient.clear();
       queryClient.setQueryData(queryKeys.me, data);
-      await purgeApiCaches();
+      // Se purga ANTES de navegar: si no, la pantalla nueva puede alcanzar a
+      // pintar los saldos del Space anterior desde caché.
+      await purgeApiCaches(data.user.id);
       router.refresh();
     },
   });

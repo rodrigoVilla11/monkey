@@ -33,3 +33,8 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# service worker generado por Serwist
+public/sw.js
+public/sw.js.map
+public/swe-worker-*.js

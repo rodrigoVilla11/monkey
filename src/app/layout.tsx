@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { PwaHead } from "@/components/layout/pwa-head";
+import { ServiceWorkerRegistration } from "@/components/layout/service-worker";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/lib/providers";
 
@@ -54,10 +56,14 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="es" suppressHydrationWarning>
+      <head>
+        <PwaHead />
+      </head>
       <body className="antialiased">
         <Providers>{children}</Providers>
         {/* Los toasts van arriba: abajo chocan con la bottom nav y el FAB. */}
         <Toaster position="top-center" richColors closeButton={false} />
+        <ServiceWorkerRegistration />
       </body>
     </html>
   );

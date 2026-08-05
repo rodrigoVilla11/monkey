@@ -33,4 +33,12 @@ const nextConfig: NextConfig = {
   },
 };
 
+/**
+ * El Service Worker NO se construye acá.
+ *
+ * Serwist se integra en modo configurador (ver `serwist.config.ts`) porque su
+ * plugin de webpack obligaría a abandonar Turbopack en todo el build. El SW se
+ * genera después, con `serwist build`, leyendo los archivos hasheados que dejó
+ * Next.
+ */
 export default nextConfig;

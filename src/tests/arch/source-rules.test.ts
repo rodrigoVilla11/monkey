@@ -100,6 +100,13 @@ describe("reglas de arquitectura", () => {
         "env.ts",
         "instrumentation.ts",
         "middleware.ts",
+        /**
+         * Contraparte pública de env.ts. El código de cliente no puede
+         * importar `env` (es server-only, valida secretos con Zod), así que
+         * este es su único acceso autorizado a process.env — y lo que exponga
+         * termina en el bundle que baja cualquiera, nunca puede ser secreto.
+         */
+        "shared/config.ts",
       ]);
 
       const offenders = sourceFiles

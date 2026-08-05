@@ -21,7 +21,12 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 5 · Spaces y membresías          | ✅     |
 | 6 · Services de dominio y API v1 | ✅     |
 | 7 · UI                           | ✅     |
-| 8 · PWA                          | ⏳     |
+| 8 · PWA                          | ✅     |
+
+**Fase 1 completa.** Las fases 2 y 3 del brief (presupuestos, reportes,
+transferencias, recurrentes, metas, deudas, importación y adjuntos) no están
+implementadas: el esquema ya las contempla y los puntos de extensión están
+puestos, pero no hay código muerto esperándolas.
 
 ---
 
@@ -292,6 +297,45 @@ con su método, autenticación y rol mínimo. De ahí salen tres tests:
 El primero es el que sostiene a los otros dos: **si agregás un endpoint y te
 olvidás de registrarlo, la suite falla** — y por lo tanto ningún endpoint puede
 quedar fuera de la matriz de permisos sin que alguien se entere.
+
+### PWA
+
+Instalable en la pantalla de inicio de un iPhone. Los assets (10 íconos, 10
+pantallas de arranque) se **generan** con `pnpm pwa:assets`: son SVG dibujado
+con geometría pura, sin tipografías ni emoji, así que el mismo comando da el
+mismo resultado en cualquier máquina.
+
+El Service Worker se construye en un paso aparte —`serwist build`, que ya está
+dentro de `pnpm build`— porque el plugin de webpack de Serwist obligaría a
+abandonar Turbopack en todo el build.
+
+| Recurso                               | Estrategia                               |
+| ------------------------------------- | ---------------------------------------- |
+| App shell (CSS, `/offline`, manifest) | Precarga: 67 kB, no 3 MB                 |
+| `/_next/static/**`                    | CacheFirst — tienen hash, son inmutables |
+| Íconos y splash                       | CacheFirst, 30 días                      |
+| `GET /api/v1/spaces/:id/**`           | NetworkFirst, un caché **por Space**     |
+| Resto de la API                       | Sin caché nunca                          |
+
+**El requisito que el brief marca como bug clásico** —que el SW no sirva datos
+de otro usuario o de otro Space— se ataca por tres lados, porque cualquiera
+solo tiene un agujero:
+
+1. **Un caché por Space** (`monkey-api-{spaceId}`). Cambiar de Space no puede
+   leer el caché de otro: son cachés distintos.
+2. **Purga explícita** al cerrar sesión y al cambiar de Space, disparada desde
+   el cliente antes de navegar.
+3. **Sello de usuario en cada respuesta cacheada.** Si al leerla el usuario
+   actual no coincide, se descarta y se va a la red. Cubre el caso feo: que el
+   mensaje de purga no llegue porque el SW estaba dormido.
+
+Además se purga al activar una versión nueva del SW: un deploy puede cambiar la
+forma de las respuestas.
+
+Sobre offline: funciona cualquier pantalla ya visitada. Una que nunca se abrió
+muestra la pantalla de sin conexión — es la contrapartida de no precargar 3 MB
+en la instalación. **No hay cola de escrituras offline en la Fase 1**, y la
+pantalla no promete lo contrario.
 
 ### Convenciones de dominio
 

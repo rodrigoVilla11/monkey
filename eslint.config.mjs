@@ -137,9 +137,12 @@ export default tseslint.config(
   },
 
   // Puntos de entrada del proceso: leen process.env por definición.
+  // `shared/config.ts` es la contraparte pública de env.ts, y el único lugar
+  // del código de cliente autorizado a leerlo.
   {
     files: [
       "src/env.ts",
+      "src/shared/config.ts",
       "src/instrumentation.ts",
       "src/middleware.ts",
       "next.config.ts",
