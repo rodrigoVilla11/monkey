@@ -16,7 +16,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | -------------------------------- | ------ |
 | 1 · Configuración del proyecto   | ✅     |
 | 2 · Esquema Prisma y migraciones | ✅     |
-| 3 · Capa de datos scopeada       | ⏳     |
+| 3 · Capa de datos scopeada       | ✅     |
 | 4 · Auth y sesiones              | ⏳     |
 | 5 · Spaces y membresías          | ⏳     |
 | 6 · Services de dominio y API v1 | ⏳     |
@@ -199,6 +199,31 @@ No son convenciones: si las rompés, no pasa `pnpm check`.
 Además de ESLint, [`src/tests/arch/source-rules.test.ts`](src/tests/arch/source-rules.test.ts)
 verifica lo mismo sobre el código fuente — porque una regla de ESLint se puede
 desactivar con un comentario.
+
+### Cómo se garantiza el aislamiento entre Spaces
+
+Son tres capas independientes. Para filtrar datos de otro Space habría que
+atravesar las tres a la vez.
+
+1. **Extensión de Prisma** ([`space-scope.ts`](src/server/db/space-scope.ts)) —
+   toda operación pasa por un hook que inyecta el filtro `spaceId` en los
+   `where` y el valor correcto en los `data`. Un modelo sin clasificar hace
+   fallar la consulta en vez de dejarla pasar sin filtro.
+
+2. **Claves foráneas compuestas** — toda relación entre entidades del dominio
+   usa `(spaceId, id)` en vez de `(id)`. La extensión garantiza que una fila
+   nazca en el Space correcto, pero no valida los IDs que vienen en el body;
+   la FK compuesta convierte "transacción del Space A apuntando a una cuenta
+   del Space B" en un error de PostgreSQL.
+
+3. **Tests de integración** ([`space-scope.test.ts`](src/tests/integration/space-scope.test.ts))
+   — dos Spaces con datos reales y 26 pruebas que intentan cruzarlos pasando
+   IDs válidos del otro por todas las vías posibles.
+
+Y una cuarta que evita que las tres se pudran:
+[`db-scope-coverage.test.ts`](src/tests/arch/db-scope-coverage.test.ts) lee
+`schema.prisma` y falla si un modelo nuevo queda sin clasificar o si una
+relación entre modelos scopeados no usa FK compuesta.
 
 ### Convenciones de dominio
 
