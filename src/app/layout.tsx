@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { Toaster } from "@/components/ui/sonner";
+import { Providers } from "@/lib/providers";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,6 +25,15 @@ export const metadata: Metadata = {
     address: false,
     email: false,
   },
+  other: {
+    /**
+     * Next 16 emite el `mobile-web-app-capable` estándar, pero las versiones
+     * de iOS anteriores a la 16.4 solo entienden el prefijado de Apple. Sin
+     * este, la app se abre con la barra de Safari encima en esos dispositivos.
+     * Se mandan los dos.
+     */
+    "apple-mobile-web-app-capable": "yes",
+  },
 };
 
 export const viewport: Viewport = {
@@ -42,7 +54,11 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <Providers>{children}</Providers>
+        {/* Los toasts van arriba: abajo chocan con la bottom nav y el FAB. */}
+        <Toaster position="top-center" richColors closeButton={false} />
+      </body>
     </html>
   );
 }
