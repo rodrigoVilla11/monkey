@@ -1,5 +1,6 @@
 import { errors } from "@/server/api/errors";
 import type { ScopedDb } from "@/server/db/scoped";
+import { sumInPrimary } from "@/server/services/reports/aggregate";
 import {
   budgetStatus,
   currentPeriod,
@@ -96,42 +97,25 @@ const spendFor = async (
     ...(categoryIds !== null ? { categoryId: { in: categoryIds } } : {}),
   };
 
+  // `sumInPrimary` convierte correctamente cuando el Space tiene varias
+  // monedas: ver la nota larga en reports/aggregate.ts.
   const [period, total] = await Promise.all([
-    db.transaction.aggregate({
-      where: {
-        ...scope,
-        date: {
-          gte: fromCalendarDate(periodStart),
-          lte: fromCalendarDate(periodEnd),
-        },
+    sumInPrimary(db, {
+      ...scope,
+      date: {
+        gte: fromCalendarDate(periodStart),
+        lte: fromCalendarDate(periodEnd),
       },
-      _sum: { amountMinor: true, amountPrimaryMinor: true },
     }),
-    db.transaction.aggregate({
-      where: {
-        ...scope,
-        date: { gte: fromCalendarDate(from), lte: fromCalendarDate(periodEnd) },
-      },
-      _sum: { amountMinor: true, amountPrimaryMinor: true },
+    sumInPrimary(db, {
+      ...scope,
+      date: { gte: fromCalendarDate(from), lte: fromCalendarDate(periodEnd) },
     }),
   ]);
 
-  /**
-   * `amountPrimaryMinor` solo está poblado cuando la moneda del movimiento
-   * difiere de la primaria. Sumar los dos campos y quedarse con el convertido
-   * cuando existe da el total en moneda primaria sin conversiones al vuelo.
-   */
-  const resolve = (sums: {
-    amountMinor: bigint | null;
-    amountPrimaryMinor: bigint | null;
-  }): bigint => {
-    const converted = sums.amountPrimaryMinor ?? 0n;
-    return converted > 0n ? converted : (sums.amountMinor ?? 0n);
-  };
-
   return {
-    periodSpentMinor: resolve(period._sum),
-    totalSpentMinor: resolve(total._sum),
+    periodSpentMinor: period.totalMinor,
+    totalSpentMinor: total.totalMinor,
   };
 };
 

@@ -2,6 +2,7 @@ import type { ScopedDb } from "@/server/db/scoped";
 import { accountBalances } from "@/server/services/balances";
 import { budgetSummary } from "@/server/services/budgets";
 import { getRateProvider } from "@/server/services/rates";
+import { groupSumInPrimary } from "./aggregate";
 import { percentageOf } from "@/shared/balance";
 import type { MoneyDTO } from "@/shared/contracts/common";
 import type {
@@ -51,17 +52,13 @@ const summarize = async (
   range: DateRange,
   primaryCurrency: string,
 ): Promise<MonthSummary> => {
-  const rows = await db.transaction.groupBy({
-    by: ["type"],
-    where: {
-      date: {
-        gte: fromCalendarDate(range.start),
-        lte: fromCalendarDate(range.end),
-      },
-      type: { in: ["INCOME", "EXPENSE"] },
+  // Suma correcta con monedas mezcladas: ver la nota en aggregate.ts.
+  const rows = await groupSumInPrimary(db, ["type"], {
+    date: {
+      gte: fromCalendarDate(range.start),
+      lte: fromCalendarDate(range.end),
     },
-    _sum: { amountMinor: true, amountPrimaryMinor: true },
-    _count: { _all: true },
+    type: { in: ["INCOME", "EXPENSE"] },
   });
 
   let incomeMinor = 0n;
@@ -69,18 +66,9 @@ const summarize = async (
   let count = 0;
 
   for (const row of rows) {
-    /**
-     * `amountPrimaryMinor` solo está poblado cuando la moneda difiere de la
-     * primaria. Sumar los dos campos por separado y juntarlos da el total en
-     * moneda primaria sin conversiones al vuelo.
-     */
-    const own = row._sum.amountMinor ?? 0n;
-    const converted = row._sum.amountPrimaryMinor ?? 0n;
-    const total = converted > 0n ? converted : own;
-
-    if (row.type === "INCOME") incomeMinor += total;
-    else if (row.type === "EXPENSE") expenseMinor += total;
-    count += row._count._all;
+    if (row.key.type === "INCOME") incomeMinor += row.totalMinor;
+    else if (row.key.type === "EXPENSE") expenseMinor += row.totalMinor;
+    count += row.count;
   }
 
   return {
@@ -169,26 +157,18 @@ const topExpenseCategories = async (
   primaryCurrency: string,
   limit: number,
 ): Promise<CategoryBreakdownItem[]> => {
-  const grouped = await db.transaction.groupBy({
-    by: ["categoryId"],
-    where: {
-      type: "EXPENSE",
-      date: {
-        gte: fromCalendarDate(range.start),
-        lte: fromCalendarDate(range.end),
-      },
+  const grouped = await groupSumInPrimary(db, ["categoryId"], {
+    type: "EXPENSE",
+    date: {
+      gte: fromCalendarDate(range.start),
+      lte: fromCalendarDate(range.end),
     },
-    _sum: { amountMinor: true, amountPrimaryMinor: true },
   });
 
-  const totals = grouped.map((row) => {
-    const own = row._sum.amountMinor ?? 0n;
-    const converted = row._sum.amountPrimaryMinor ?? 0n;
-    return {
-      categoryId: row.categoryId,
-      totalMinor: converted > 0n ? converted : own,
-    };
-  });
+  const totals = grouped.map((row) => ({
+    categoryId: row.key.categoryId,
+    totalMinor: row.totalMinor,
+  }));
 
   const grandTotal = totals.reduce((sum, row) => sum + row.totalMinor, 0n);
 
@@ -240,36 +220,29 @@ const byMember = async (
 
   if (memberships.length <= 1) return [];
 
-  const grouped = await db.transaction.groupBy({
-    by: ["createdByUserId"],
-    where: {
-      type: "EXPENSE",
-      date: {
-        gte: fromCalendarDate(range.start),
-        lte: fromCalendarDate(range.end),
-      },
+  const grouped = await groupSumInPrimary(db, ["createdByUserId"], {
+    type: "EXPENSE",
+    date: {
+      gte: fromCalendarDate(range.start),
+      lte: fromCalendarDate(range.end),
     },
-    _sum: { amountMinor: true, amountPrimaryMinor: true },
-    _count: { _all: true },
   });
 
   const byId = new Map(memberships.map((m) => [m.userId, m.user]));
 
   return grouped
     .map((row) => {
-      const own = row._sum.amountMinor ?? 0n;
-      const converted = row._sum.amountPrimaryMinor ?? 0n;
-      const user =
-        row.createdByUserId === null ? null : byId.get(row.createdByUserId);
+      const userId = row.key.createdByUserId;
+      const user = userId === null ? null : byId.get(userId);
 
       return {
-        userId: row.createdByUserId,
+        userId,
         // Quien ya no es miembro (o borró su cuenta) igual aparece: sus
         // movimientos siguen siendo del Space.
         name: user?.name ?? "Ex miembro",
         avatarUrl: user?.avatarUrl ?? null,
-        total: dto(converted > 0n ? converted : own, primaryCurrency),
-        transactionCount: row._count._all,
+        total: dto(row.totalMinor, primaryCurrency),
+        transactionCount: row.count,
       };
     })
     .sort((a, b) =>

@@ -153,6 +153,22 @@ describe("porcentajes", () => {
     expect(Number.isInteger(result * 10)).toBe(true);
   });
 
+  it("redondea al más cercano en vez de truncar", () => {
+    // 86.07 % tiene que verse como 86.1, no como 86.0.
+    expect(percentageOf(98_990n, 115_010n)).toBe(86.1);
+    // Y el redondeo va hacia arriba justo en el medio: 0.05 → 0.1.
+    expect(percentageOf(5n, 10_000n)).toBe(0.1);
+  });
+
+  it("el desglose de un reporte suma ~100 %", () => {
+    // Truncar sesgaba a la baja: estas cuatro partes daban 99.8 %.
+    const total = 115_010n;
+    const parts = [98_990n, 13_030n, 1890n, 1100n];
+    const sum = parts.reduce((acc, part) => acc + percentageOf(part, total), 0);
+
+    expect(Math.abs(sum - 100)).toBeLessThanOrEqual(0.1);
+  });
+
   it("un total en cero da cero, no NaN ni Infinity", () => {
     expect(percentageOf(100n, 0n)).toBe(0);
   });

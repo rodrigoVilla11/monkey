@@ -357,6 +357,33 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "Borrado lógico: no toca ningún movimiento, por eso alcanza MEMBER",
   },
 
+  // ── reportes ─────────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/reports/monthly",
+    auth: "verified",
+    minRole: "VIEWER",
+    note: "Evolución mensual y cash flow: misma serie, dos lecturas",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/reports/categories",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/reports/comparison",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/reports/members",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+
   // ── dashboard ────────────────────────────────────────────────────────────
   {
     method: "GET",

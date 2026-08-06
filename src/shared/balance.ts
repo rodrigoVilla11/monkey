@@ -100,6 +100,9 @@ export const percentageOf = (partMinor: bigint, totalMinor: bigint): number => {
   const part = partMinor < 0n ? -partMinor : partMinor;
   const total = totalMinor < 0n ? -totalMinor : totalMinor;
 
-  // ×1000 para conservar un decimal después de la división entera.
-  return Number((part * 1000n) / total) / 10;
+  // ×1000 para conservar un decimal después de la división entera. El
+  // `+ total / 2n` redondea al más cercano en vez de truncar: truncar sesga
+  // siempre a la baja, y con varias categorías el desglose sumaba 99.8 % en
+  // lugar de 100 %.
+  return Number((part * 1000n + total / 2n) / total) / 10;
 };

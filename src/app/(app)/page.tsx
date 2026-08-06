@@ -215,7 +215,12 @@ export default function DashboardPage() {
       {/* Top categorías */}
       {topExpenseCategories.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm font-semibold">En qué se fue el mes</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">En qué se fue el mes</h2>
+            <Link href="/reports" className="text-xs text-muted-foreground">
+              Ver reportes
+            </Link>
+          </div>
           <Card className="p-4">
             <CategoryDonut data={topExpenseCategories} locale={locale} />
           </Card>

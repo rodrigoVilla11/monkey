@@ -28,7 +28,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | Fase 2 — Análisis y control | Estado |
 | --------------------------- | ------ |
 | 9 · Presupuestos            | ✅     |
-| 10 · Reportes               | ⏳     |
+| 10 · Reportes               | ✅     |
 | 11 · Transferencias         | ⏳     |
 | 12 · Recurrentes + cron     | ⏳     |
 
@@ -240,6 +240,14 @@ Y una cuarta que evita que las tres se pudran:
 [`db-scope-coverage.test.ts`](src/tests/arch/db-scope-coverage.test.ts) lee
 `schema.prisma` y falla si un modelo nuevo queda sin clasificar o si una
 relación entre modelos scopeados no usa FK compuesta.
+
+**La única salida de emergencia** es [`src/server/db/raw/`](src/server/db/raw/),
+donde vive el SQL crudo de los reportes —agrupar por mes necesita `date_trunc`,
+y el `groupBy` de Prisma solo admite columnas—. Ahí la extensión no llega, así
+que rige una regla propia: toda función recibe `spaceId` como primer parámetro y
+lo filtra. Un test de arquitectura verifica que ningún otro directorio use
+`$queryRaw`, y los tests de reportes comprueban el aislamiento consultando desde
+un Space con datos del otro al lado.
 
 ### Autenticación
 
