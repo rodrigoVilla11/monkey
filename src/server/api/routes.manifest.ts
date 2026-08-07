@@ -385,6 +385,48 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "Borrado lógico: no toca ningún movimiento, por eso alcanza MEMBER",
   },
 
+  // ── recurrentes ──────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/recurring",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/recurring",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/recurring/[ruleId]",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/recurring/[ruleId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/recurring/[ruleId]",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Borrado lógico: las transacciones que ya generó se quedan",
+  },
+
+  // ── jobs ─────────────────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/v1/jobs/recurring",
+    auth: "public",
+    rateLimited: true,
+    note: "Sin sesión: lo dispara el cron con CRON_SECRET. Cruza Spaces a propósito y es el único que lo hace",
+  },
+
   // ── reportes ─────────────────────────────────────────────────────────────
   {
     method: "GET",

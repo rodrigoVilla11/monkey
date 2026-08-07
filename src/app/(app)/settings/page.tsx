@@ -1,9 +1,12 @@
 "use client";
 
 import {
+  CalendarClock,
+  ChartColumn,
   ChevronRight,
   LogOut,
   Moon,
+  PiggyBank,
   ShieldCheck,
   Sun,
   Users,
@@ -64,6 +67,23 @@ export default function SettingsPage() {
               icon={<Users className="size-4" />}
               label="Miembros"
               value={`${String(space.memberCount)} · sos ${ROLE_LABELS[space.role].toLowerCase()}`}
+            />
+            {/* Los programados no van en la barra inferior: se configuran una
+                vez y después se miran poco. */}
+            <Row
+              href="/recurring"
+              icon={<CalendarClock className="size-4" />}
+              label="Movimientos programados"
+            />
+            <Row
+              href="/budgets"
+              icon={<PiggyBank className="size-4" />}
+              label="Presupuestos"
+            />
+            <Row
+              href="/reports"
+              icon={<ChartColumn className="size-4" />}
+              label="Reportes"
             />
           </Card>
         </section>

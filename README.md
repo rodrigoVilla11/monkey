@@ -30,7 +30,9 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 9 · Presupuestos            | ✅     |
 | 10 · Reportes               | ✅     |
 | 11 · Transferencias         | ✅     |
-| 12 · Recurrentes + cron     | ⏳     |
+| 12 · Recurrentes + cron     | ✅     |
+
+**Fase 2 completa.**
 
 La Fase 3 (metas, deudas, importación, exportación, adjuntos y división de
 gastos) no está implementada: el esquema ya la contempla y los puntos de
@@ -314,6 +316,44 @@ El primero es el que sostiene a los otros dos: **si agregás un endpoint y te
 olvidás de registrarlo, la suite falla** — y por lo tanto ningún endpoint puede
 quedar fuera de la matriz de permisos sin que alguien se entere.
 
+### El job de recurrentes
+
+`POST /api/v1/jobs/recurring` es el **único endpoint que cruza Spaces** y el
+único que no se autentica con sesión: no hay un usuario detrás, hay un cron. Va
+con `Authorization: Bearer $CRON_SECRET`, comparado en tiempo constante, y
+`CRON_SECRET` es obligatorio en producción.
+
+```
+15 3 * * * curl -fsS -X POST \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://monkey.example/api/v1/jobs/recurring
+```
+
+**Si el job estuvo caído, se materializan TODAS las ocurrencias vencidas, cada
+una con su fecha.** Si el alquiler vencía el 1 y el job recién corre el 20, la
+transacción se fecha el 1. Las otras dos opciones son peores: saltear al futuro
+perdería un gasto que sí salió de la cuenta, y meter una sola fechada hoy
+pondría el alquiler de enero en el mes de marzo y todos los reportes mensuales
+pasarían a mentir. La fecha es un hecho económico, no la hora a la que corrió un
+proceso.
+
+Tres frenos lo acompañan:
+
+1. **Tope de 60 ocurrencias por regla y corrida.** Una regla diaria caída seis
+   meses generaría 180 filas de un saque. Se reparte entre corridas — no se
+   saltea nada, y lo que queda pendiente sale en el reporte y en el log.
+2. **Idempotencia en la base.** Un unique parcial sobre
+   `(spaceId, recurringRuleId, date)` impide que dos disparos del cron dupliquen
+   el mismo mes. Dispararlo de más es inocuo.
+3. **Una transacción de base por regla.** Si una regla falla —por ejemplo, no
+   hay cotización cargada para su fecha— se cuenta como fallo y el barrido sigue
+   con las demás.
+
+El motor de recurrencia ([`recurrence.ts`](src/shared/recurrence.ts)) es puro y
+calcula cada ocurrencia **desde el ancla, nunca desde la anterior**. Encadenando
+sumas, "cada mes el 31" pasaría por el 28 de febrero y se quedaría en el 28 para
+siempre.
+
 ### PWA
 
 Instalable en la pantalla de inicio de un iPhone. Los assets (10 íconos, 10
@@ -370,6 +410,8 @@ pantalla no promete lo contrario.
   banco no aplica la cotización publicada: aplica la suya y cobra comisión.
   Diciendo cuánto salió y cuánto llegó, la cotización real de la operación sale
   sola y el saldo cuadra contra el extracto.
+- **Un movimiento recurrente atrasado se materializa con SU fecha**, no con la
+  del día en que corrió el job. Ver abajo.
 - **Multi-moneda desde el día uno.** Cada transacción congela su tipo de cambio
   al crearse. Los reportes históricos nunca se recalculan con la tasa de hoy.
 - **`spaceId` va en la URL**, no en el body ni en un header: hace que las

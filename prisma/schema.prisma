@@ -461,6 +461,9 @@ model Transaction {
   /// con transferGroupId y solo cuando type = TRANSFER. Otro CHECK impide que
   /// una transferencia lleve categoría.
   transferDirection TransferDirection?
+  /// Una regla no puede generar dos veces la misma fecha: unique PARCIAL sobre
+  /// (spaceId, recurringRuleId, date) en la migración. Es la idempotencia del
+  /// job de materialización, que corre por cron y puede dispararse de más.
   recurringRuleId   String?
 
   createdAt DateTime  @default(now())
