@@ -464,6 +464,59 @@ export const ROUTES: readonly RouteSpec[] = [
     minRole: "MEMBER",
   },
 
+  // ── deudas y préstamos ───────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/debts",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/debts",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/debts/[debtId]",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/debts/[debtId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/debts/[debtId]",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Borrado lógico: los movimientos vinculados no se tocan",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/debts/[debtId]/payments",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Nunca crea un movimiento: se vincula a uno o se registra suelto",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/debts/[debtId]/payments/[paymentId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/net-position",
+    auth: "verified",
+    minRole: "VIEWER",
+    note: "Caja + por cobrar − por pagar. Aparte de la curva de los reportes",
+  },
+
   // ── jobs ─────────────────────────────────────────────────────────────────
   {
     method: "POST",

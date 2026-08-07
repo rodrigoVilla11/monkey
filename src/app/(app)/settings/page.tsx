@@ -4,6 +4,7 @@ import {
   CalendarClock,
   ChartColumn,
   ChevronRight,
+  HandCoins,
   LogOut,
   Moon,
   PiggyBank,
@@ -85,6 +86,11 @@ export default function SettingsPage() {
               href="/goals"
               icon={<Target className="size-4" />}
               label="Metas de ahorro"
+            />
+            <Row
+              href="/debts"
+              icon={<HandCoins className="size-4" />}
+              label="Deudas y préstamos"
             />
             <Row
               href="/reports"

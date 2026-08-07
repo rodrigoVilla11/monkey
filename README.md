@@ -37,7 +37,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | Fase 3 — Lo que falta      | Estado |
 | -------------------------- | ------ |
 | 13 · Metas de ahorro       | ✅     |
-| 14 · Deudas                | ⏳     |
+| 14 · Deudas                | ✅     |
 | 15 · Importar/exportar CSV | ⏳     |
 | 16 · Adjuntos              | ⏳     |
 | 17 · División de gastos    | ⏳     |
@@ -416,6 +416,17 @@ pantalla no promete lo contrario.
   sola y el saldo cuadra contra el extracto.
 - **Un movimiento recurrente atrasado se materializa con SU fecha**, no con la
   del día en que corrió el job. Ver abajo.
+- **Las deudas registran, no amortizan.** El saldo es `original − pagos`, sin
+  capitalizar intereses. Calcular la cuota de un préstamo daría un número que no
+  coincide con el recibo del banco —convenciones de días, comisiones, seguros,
+  redondeos— y un número casi correcto en finanzas es peor que ninguno. La tasa
+  sí se usa: para decir cuánto **cuesta por mes** el saldo pendiente, que es
+  aritmética sobre lo que escribiste y no una predicción sobre tu banco.
+- **La posición neta vive aparte de la curva de los reportes.** Esa curva es una
+  posición de caja; meterle deudas redefiniría en silencio lo que significan
+  todos los reportes que ya existen. Un préstamo recién recibido lo muestra: los
+  10.000 € están en la cuenta —la caja sube— y el neto no se movió. Las dos
+  cifras son ciertas y responden preguntas distintas.
 - **Ahorrar no es gastar.** Un aporte a una meta nunca crea un movimiento:
   apartar 200 € no baja el patrimonio, la plata sigue siendo tuya. O se vincula
   a un movimiento que ya existe —la transferencia a la cuenta de ahorro— o es
