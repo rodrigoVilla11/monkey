@@ -5,6 +5,7 @@ import {
   type TransactionClient,
 } from "@/server/services/audit/log";
 import { getRateProvider } from "@/server/services/rates";
+import { counterpartAccounts } from "@/server/services/transfers";
 import type { Page } from "@/shared/contracts/common";
 import type {
   CreateTransactionRequest,
@@ -49,6 +50,7 @@ const SELECT = {
   notes: true,
   payee: true,
   transferGroupId: true,
+  transferDirection: true,
   createdAt: true,
   createdByUserId: true,
   createdByName: true,
@@ -71,6 +73,7 @@ interface Row {
   notes: string | null;
   payee: string | null;
   transferGroupId: string | null;
+  transferDirection: "OUT" | "IN" | null;
   createdAt: Date;
   createdByUserId: string | null;
   createdByName: string;
@@ -90,7 +93,11 @@ interface Row {
   tags: { tag: { id: string; name: string; color: string | null } }[];
 }
 
-const toDTO = (row: Row, primaryCurrency: string): TransactionDTO => ({
+const toDTO = (
+  row: Row,
+  primaryCurrency: string,
+  counterparts?: ReadonlyMap<string, { id: string; name: string }>,
+): TransactionDTO => ({
   id: row.id,
   type: row.type as TransactionDTO["type"],
   status: row.status as TransactionDTO["status"],
@@ -116,6 +123,8 @@ const toDTO = (row: Row, primaryCurrency: string): TransactionDTO => ({
   },
   tags: row.tags.map((t) => t.tag),
   transferGroupId: row.transferGroupId,
+  transferDirection: row.transferDirection,
+  transferCounterpartAccount: counterparts?.get(row.id) ?? null,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -208,8 +217,16 @@ export const listTransactions = async (
   const hasMore = rows.length > pagination.limit;
   const page = hasMore ? rows.slice(0, pagination.limit) : rows;
 
+  // Una sola consulta para las contrapartes de toda la página, no una por fila.
+  const counterparts = await counterpartAccounts(
+    db,
+    page
+      .map((row) => row.transferGroupId)
+      .filter((id): id is string => id !== null),
+  );
+
   return {
-    items: page.map((row) => toDTO(row as Row, primaryCurrency)),
+    items: page.map((row) => toDTO(row as Row, primaryCurrency, counterparts)),
     nextCursor: hasMore ? (page.at(-1)?.id ?? null) : null,
   };
 };
@@ -221,7 +238,13 @@ export const getTransaction = async (
 ): Promise<TransactionDTO> => {
   const row = await db.transaction.findFirst({ where: { id }, select: SELECT });
   if (row === null) throw errors.notFound("No se encontró el movimiento");
-  return toDTO(row, primaryCurrency);
+
+  const counterparts = await counterpartAccounts(
+    db,
+    row.transferGroupId === null ? [] : [row.transferGroupId],
+  );
+
+  return toDTO(row, primaryCurrency, counterparts);
 };
 
 interface SpaceContext {

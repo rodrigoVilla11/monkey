@@ -375,6 +375,51 @@ export const convert = (
 };
 
 /**
+ * Cotización implícita entre dos importes: la operación inversa de `convert`.
+ *
+ * Devuelve el `rate` tal que 1 unidad de `from.currency` equivale a `rate`
+ * unidades de `to.currency`, con 12 decimales — la precisión de la columna
+ * `Transaction.exchangeRateSnapshot`.
+ *
+ * Existe por las transferencias entre monedas distintas. Ahí no se pregunta una
+ * cotización a nadie: el usuario dice cuánto salió de una cuenta y cuánto entró
+ * en la otra, y de esos dos números sale la cotización REAL de la operación
+ * —comisiones y diferencial del banco incluidos—, que es la que hay que
+ * congelar. Una cotización de mercado dejaría la diferencia sin explicar.
+ *
+ *   rate = (to / 10^expDestino) / (from / 10^expOrigen)
+ *
+ * Se calcula con enteros y se redondea al final. El importe convertido se
+ * guarda aparte y es el que mandan los reportes: la cotización es informativa,
+ * así que el redondeo a 12 decimales no descuadra ninguna suma.
+ */
+export const deriveRate = (from: Money, to: Money): MoneyResult<string> => {
+  if (!isCurrencyCode(from.currency) || !isCurrencyCode(to.currency)) {
+    return fail("INVALID_CURRENCY");
+  }
+  // Sin un importe de origen no hay proporción que sacar, y una cotización de
+  // cero está prohibida por el CHECK `Transaction_fx_rate_positive`.
+  if (from.amountMinor <= 0n || to.amountMinor <= 0n)
+    return fail("INVALID_RATE");
+
+  const PRECISION = 12n;
+  const numerator =
+    to.amountMinor * getCurrencyFactor(from.currency) * 10n ** PRECISION;
+  const denominator = from.amountMinor * getCurrencyFactor(to.currency);
+
+  const scaled = divideRoundHalfUp(numerator, denominator);
+  // Una proporción tan chica que se redondea a cero tampoco es una cotización.
+  if (scaled === 0n) return fail("INVALID_RATE");
+
+  const text = scaled.toString().padStart(Number(PRECISION) + 1, "0");
+  const cut = text.length - Number(PRECISION);
+  const whole = text.slice(0, cut);
+  const fraction = text.slice(cut).replace(/0+$/, "");
+
+  return ok(fraction === "" ? whole : `${whole}.${fraction}`);
+};
+
+/**
  * Reparte un importe en N partes sin perder ni ganar un céntimo.
  *
  * Los céntimos que sobran del redondeo se distribuyen de a uno entre las

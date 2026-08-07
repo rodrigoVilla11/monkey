@@ -29,7 +29,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | --------------------------- | ------ |
 | 9 · Presupuestos            | ✅     |
 | 10 · Reportes               | ✅     |
-| 11 · Transferencias         | ⏳     |
+| 11 · Transferencias         | ✅     |
 | 12 · Recurrentes + cron     | ⏳     |
 
 La Fase 3 (metas, deudas, importación, exportación, adjuntos y división de
@@ -360,7 +360,16 @@ pantalla no promete lo contrario.
   cable viajan como **strings**: `JSON.stringify` no sabe serializar `bigint` y
   un `number` pierde precisión arriba de 2^53.
 - **El importe siempre es positivo.** El signo lo determina el `type` de la
-  transacción, no el valor.
+  transacción, no el valor. En las transferencias, donde las dos patas comparten
+  el tipo TRANSFER, lo determina `transferDirection`.
+- **Una transferencia no cambia el patrimonio.** Sus dos patas valen exactamente
+  lo mismo en la moneda primaria, aunque las cuentas estén en monedas distintas.
+  No se controla después: se calcula un solo importe en moneda primaria y se le
+  asigna a las dos.
+- **Entre monedas distintas se piden los dos importes, no una cotización.** El
+  banco no aplica la cotización publicada: aplica la suya y cobra comisión.
+  Diciendo cuánto salió y cuánto llegó, la cotización real de la operación sale
+  sola y el saldo cuadra contra el extracto.
 - **Multi-moneda desde el día uno.** Cada transacción congela su tipo de cambio
   al crearse. Los reportes históricos nunca se recalculan con la tasa de hoy.
 - **`spaceId` va en la URL**, no en el body ni en un header: hace que las

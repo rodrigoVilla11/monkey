@@ -10,6 +10,7 @@ import {
   allocate,
   compare,
   convert,
+  deriveRate,
   divideRoundHalfUp,
   formatMoney,
   fromDTO,
@@ -394,6 +395,68 @@ describe("convert", () => {
     expect(convert(money(100n, "EUR"), "0", "ARS").ok).toBe(false);
     expect(convert(money(100n, "EUR"), "abc", "ARS").ok).toBe(false);
     expect(convert(money(100n, "EUR"), "1.5", "ars").ok).toBe(false);
+  });
+});
+
+describe("deriveRate", () => {
+  it("saca la cotización implícita entre dos importes", () => {
+    // Salieron 100,00 EUR y entraron 115.050,00 ARS → 1150,50 ARS por euro.
+    expect(
+      unwrap(deriveRate(money(10_000n, "EUR"), money(11_505_000n, "ARS"))),
+    ).toBe("1150.5");
+  });
+
+  it("ajusta la diferencia de exponentes", () => {
+    // 100,00 EUR → 17.025 JPY (sin decimales) = 170,25 yenes por euro.
+    expect(
+      unwrap(deriveRate(money(10_000n, "EUR"), money(17_025n, "JPY"))),
+    ).toBe("170.25");
+    // Y en el sentido inverso: 1000 JPY → 5,80 EUR = 0,0058 EUR por yen.
+    expect(unwrap(deriveRate(money(1000n, "JPY"), money(580n, "EUR")))).toBe(
+      "0.0058",
+    );
+  });
+
+  it("es la inversa de convert", () => {
+    // La ida y vuelta tiene que devolver el importe de destino exacto: es lo
+    // que sostiene que una transferencia entre monedas quede neutra.
+    const cases: [bigint, string, bigint, string][] = [
+      [10_000n, "EUR", 11_505_000n, "ARS"],
+      [1000n, "JPY", 580n, "EUR"],
+      [123_456n, "USD", 9876n, "EUR"],
+      [1n, "EUR", 1_234_567n, "ARS"],
+    ];
+
+    for (const [fromMinor, fromCurrency, toMinor, toCurrency] of cases) {
+      const from = money(fromMinor, fromCurrency);
+      const rate = unwrap(deriveRate(from, money(toMinor, toCurrency)));
+
+      expect(unwrap(convert(from, rate, toCurrency)).amountMinor).toBe(toMinor);
+    }
+  });
+
+  it("da 1 cuando los importes coinciden en la misma moneda", () => {
+    expect(unwrap(deriveRate(money(500n, "EUR"), money(500n, "EUR")))).toBe(
+      "1",
+    );
+  });
+
+  it("rechaza importes en cero: no hay proporción ni cotización válida", () => {
+    expect(deriveRate(money(0n, "EUR"), money(100n, "ARS")).ok).toBe(false);
+    expect(deriveRate(money(100n, "EUR"), money(0n, "ARS")).ok).toBe(false);
+  });
+
+  it("rechaza una proporción que se redondea a cero", () => {
+    // 10.000.000.000 ARS que se convierten en 1 céntimo de euro darían una
+    // cotización por debajo del último de los 12 decimales.
+    expect(deriveRate(money(10n ** 15n, "ARS"), money(1n, "EUR")).ok).toBe(
+      false,
+    );
+  });
+
+  it("rechaza códigos de moneda inválidos", () => {
+    expect(deriveRate(money(100n, "eur"), money(100n, "ARS")).ok).toBe(false);
+    expect(deriveRate(money(100n, "EUR"), money(100n, "XX")).ok).toBe(false);
   });
 });
 

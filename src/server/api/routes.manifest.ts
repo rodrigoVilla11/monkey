@@ -298,6 +298,34 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "La operación más destructiva del dominio: ADMIN y auditada",
   },
 
+  // ── transferencias ───────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/transfers",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Escribe las dos patas en una transacción de base: nunca media",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/transfers/[transferGroupId]",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/transfers/[transferGroupId]",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Reemplaza la transferencia entera: no se edita una pata suelta",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/transfers/[transferGroupId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+
   // ── etiquetas ────────────────────────────────────────────────────────────
   {
     method: "GET",

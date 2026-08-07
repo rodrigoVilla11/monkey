@@ -165,6 +165,16 @@ export interface TransactionDTO {
     readonly color: string | null;
   }[];
   readonly transferGroupId: string | null;
+  /** Sentido de la pata. Solo en transferencias; determina el signo. */
+  readonly transferDirection: "OUT" | "IN" | null;
+  /**
+   * La otra cuenta de la transferencia, para que la fila pueda leerse
+   * "Efectivo → Banco" sin que el cliente tenga que buscar la pata de enfrente.
+   */
+  readonly transferCounterpartAccount: {
+    readonly id: string;
+    readonly name: string;
+  } | null;
   readonly createdAt: string;
 }
 

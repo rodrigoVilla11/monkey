@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Loader2, X } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -134,7 +134,21 @@ export default function NewTransactionPage() {
           ))}
         </div>
 
-        <span className="w-10" />
+        {/* La transferencia sale por acá y no por un tercer botón del
+            segmentado: no es un tipo más de movimiento —no lleva categoría y
+            toca dos cuentas—, así que tiene su propia pantalla. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="-mr-2 min-h-touch min-w-touch"
+          onClick={() => {
+            router.push("/transactions/transfer");
+          }}
+          aria-label="Transferir entre cuentas"
+          title="Transferir entre cuentas"
+        >
+          <ArrowLeftRight className="size-5" />
+        </Button>
       </header>
 
       <AmountPad

@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Receipt } from "lucide-react";
+import { ArrowLeftRight, Loader2, Receipt } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -132,7 +132,28 @@ function TransactionRow({
   showAuthor: boolean;
   onSelect?: (transaction: TransactionDTO) => void;
 }) {
-  const color = transaction.category?.color ?? "#71717a";
+  const isTransfer = transaction.type === "TRANSFER";
+  const color = isTransfer
+    ? "#71717a"
+    : (transaction.category?.color ?? "#71717a");
+
+  /**
+   * En una transferencia el título es el recorrido, no la categoría: una
+   * transferencia no tiene, y "Sin descripción" no le dice nada a nadie.
+   * La contraparte viene resuelta desde el servidor.
+   */
+  const counterpart = transaction.transferCounterpartAccount?.name;
+  const title = isTransfer
+    ? (transaction.description ??
+      (counterpart === undefined
+        ? "Transferencia"
+        : transaction.transferDirection === "OUT"
+          ? `Hacia ${counterpart}`
+          : `Desde ${counterpart}`))
+    : (transaction.description ??
+      transaction.payee ??
+      transaction.category?.name ??
+      "Sin descripción");
 
   return (
     <button
@@ -146,20 +167,19 @@ function TransactionRow({
         className="flex size-10 shrink-0 items-center justify-center rounded-full"
         style={{ backgroundColor: `${color}26` }}
       >
-        <DynamicIcon
-          name={transaction.category?.icon}
-          className="size-4.5"
-          style={{ color }}
-        />
+        {isTransfer ? (
+          <ArrowLeftRight className="size-4.5" style={{ color }} />
+        ) : (
+          <DynamicIcon
+            name={transaction.category?.icon}
+            className="size-4.5"
+            style={{ color }}
+          />
+        )}
       </span>
 
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">
-          {transaction.description ??
-            transaction.payee ??
-            transaction.category?.name ??
-            "Sin descripción"}
-        </span>
+        <span className="block truncate text-sm font-medium">{title}</span>
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {showAuthor && (
             <Avatar className="size-4" title={transaction.author.name}>
@@ -182,9 +202,17 @@ function TransactionRow({
         className={cn(
           "shrink-0 text-sm font-semibold tabular-nums",
           transaction.type === "INCOME" && "text-income",
+          // La transferencia va en gris: no es ni ingreso ni gasto, y pintarla
+          // de verde la haría parecer plata que entró de afuera.
+          isTransfer && "font-medium text-muted-foreground",
         )}
       >
-        {formatSignedAmount(transaction.amount, transaction.type, locale)}
+        {formatSignedAmount(
+          transaction.amount,
+          transaction.type,
+          locale,
+          transaction.transferDirection,
+        )}
       </span>
     </button>
   );

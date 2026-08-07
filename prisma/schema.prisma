@@ -454,9 +454,12 @@ model Transaction {
   payee       String?
 
   /// Las transferencias son un par de transacciones con el mismo grupo.
+  /// "Como mucho una pata por sentido en cada grupo" es un unique PARCIAL
+  /// (excluye las borradas): Prisma no lo expresa, va a mano en la migración.
   transferGroupId   String?
   /// Solo en las patas de una transferencia. Un CHECK garantiza que vaya junto
-  /// con transferGroupId y solo cuando type = TRANSFER.
+  /// con transferGroupId y solo cuando type = TRANSFER. Otro CHECK impide que
+  /// una transferencia lleve categoría.
   transferDirection TransferDirection?
   recurringRuleId   String?
 

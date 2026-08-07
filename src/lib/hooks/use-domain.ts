@@ -22,6 +22,10 @@ import type {
   TransactionDTO,
   TransactionFilters,
 } from "@/shared/contracts/transactions";
+import type {
+  CreateTransferRequest,
+  TransferDTO,
+} from "@/shared/contracts/transfers";
 import type { SpaceMember } from "@/shared/contracts/spaces";
 
 /** Hooks del dominio financiero. Todos cuelgan de un spaceId. */
@@ -125,6 +129,19 @@ export const useCreateTransaction = (spaceId: string) => {
     mutationFn: (input: CreateTransactionRequest) =>
       api.post<{ transaction: TransactionDTO }>(
         `/spaces/${spaceId}/transactions`,
+        input,
+      ),
+    onSuccess: invalidate,
+  });
+};
+
+export const useCreateTransfer = (spaceId: string) => {
+  const invalidate = useInvalidateSpace(spaceId);
+
+  return useMutation({
+    mutationFn: (input: CreateTransferRequest) =>
+      api.post<{ transfer: TransferDTO }>(
+        `/spaces/${spaceId}/transfers`,
         input,
       ),
     onSuccess: invalidate,

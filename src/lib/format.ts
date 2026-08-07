@@ -21,16 +21,27 @@ export const formatMoneyDTO = (
     options ?? {},
   );
 
-/** Importe con signo según el tipo de movimiento. */
+/**
+ * Importe con signo según el tipo de movimiento.
+ *
+ * Las dos patas de una transferencia comparten el tipo TRANSFER y mueven el
+ * saldo en sentidos opuestos, así que el signo sale de `transferDirection`.
+ * Sin esto, la pata de salida se mostraría en positivo y la lista diría que
+ * mover plata entre cuentas propias suma dos veces.
+ */
 export const formatSignedAmount = (
   value: MoneyDTO,
   type: "INCOME" | "EXPENSE" | "TRANSFER",
   locale: string,
+  transferDirection?: "OUT" | "IN" | null,
 ): string => {
   const amount = BigInt(value.amountMinor);
-  const signed = type === "EXPENSE" ? -amount : amount;
+  const negative = type === "EXPENSE" || transferDirection === "OUT";
+  const signed = negative ? -amount : amount;
+
   return formatMoney(money(signed, value.currency), locale, {
-    signDisplay: type === "INCOME" ? "always" : "auto",
+    signDisplay:
+      type === "INCOME" || transferDirection === "IN" ? "always" : "auto",
   });
 };
 
