@@ -34,9 +34,13 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 
 **Fase 2 completa.**
 
-La Fase 3 (metas, deudas, importación, exportación, adjuntos y división de
-gastos) no está implementada: el esquema ya la contempla y los puntos de
-extensión están puestos, pero no hay código muerto esperándola.
+| Fase 3 — Lo que falta      | Estado |
+| -------------------------- | ------ |
+| 13 · Metas de ahorro       | ✅     |
+| 14 · Deudas                | ⏳     |
+| 15 · Importar/exportar CSV | ⏳     |
+| 16 · Adjuntos              | ⏳     |
+| 17 · División de gastos    | ⏳     |
 
 ---
 
@@ -412,6 +416,12 @@ pantalla no promete lo contrario.
   sola y el saldo cuadra contra el extracto.
 - **Un movimiento recurrente atrasado se materializa con SU fecha**, no con la
   del día en que corrió el job. Ver abajo.
+- **Ahorrar no es gastar.** Un aporte a una meta nunca crea un movimiento:
+  apartar 200 € no baja el patrimonio, la plata sigue siendo tuya. O se vincula
+  a un movimiento que ya existe —la transferencia a la cuenta de ahorro— o es
+  puro registro. Y el progreso de una meta son sus aportes, no el saldo de
+  ninguna cuenta: atarlo al saldo se rompe apenas esa cuenta se use para otra
+  cosa, y con dos metas sobre la misma cuenta las dos mostrarían el total.
 - **Multi-moneda desde el día uno.** Cada transacción congela su tipo de cambio
   al crearse. Los reportes históricos nunca se recalculan con la tasa de hoy.
 - **`spaceId` va en la URL**, no en el body ni en un header: hace que las

@@ -142,10 +142,41 @@ const toResponse = (error: unknown, log: Logger): NextResponse => {
     return json(wrapped.toBody(), { status: wrapped.status });
   }
 
+  /**
+   * Violación de unicidad. Es una condición ESPERABLE —dos etiquetas con el
+   * mismo nombre, el mismo movimiento vinculado dos veces a una meta— y por lo
+   * tanto un 409, no un 500: el cliente hizo algo que no se puede, no se rompió
+   * el servidor.
+   *
+   * Está acá y no en cada service a propósito: los índices únicos son la última
+   * línea de defensa de varias invariantes del dominio, y ninguna de ellas
+   * debería poder devolver un 500 por olvidarse de mapear el error.
+   */
+  if (isUniqueViolation(error)) {
+    log.info({ err: error }, "violación de unicidad");
+    const conflict = new ApiError(
+      "CONFLICT",
+      "Eso ya existe o ya está registrado",
+    );
+    return json(conflict.toBody(), { status: conflict.status });
+  }
+
   log.error({ err: error }, "error no controlado");
   const internal = errors.internal();
   return json(internal.toBody(), { status: internal.status });
 };
+
+/**
+ * P2002 es el código de Prisma para "unique constraint failed".
+ *
+ * Se comprueba por forma y no con `instanceof PrismaClientKnownRequestError`
+ * para no atar el wrapper de handlers al runtime de Prisma: acá adentro no
+ * debería haber ni una importación de la capa de datos.
+ */
+const isUniqueViolation = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  (error as { code?: unknown }).code === "P2002";
 
 type RouteEntry = (
   request: NextRequest,

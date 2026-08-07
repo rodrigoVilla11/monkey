@@ -418,6 +418,52 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "Borrado lógico: las transacciones que ya generó se quedan",
   },
 
+  // ── metas de ahorro ──────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/goals",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/goals",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/goals/[goalId]",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/goals/[goalId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/goals/[goalId]",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Borrado lógico: los movimientos vinculados no se tocan",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/goals/[goalId]/contributions",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Nunca crea un movimiento: ahorrar no es gastar",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/goals/[goalId]/contributions/[contributionId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+
   // ── jobs ─────────────────────────────────────────────────────────────────
   {
     method: "POST",

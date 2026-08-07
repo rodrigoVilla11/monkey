@@ -9,6 +9,7 @@ import {
   PiggyBank,
   ShieldCheck,
   Sun,
+  Target,
   Users,
 } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -79,6 +80,11 @@ export default function SettingsPage() {
               href="/budgets"
               icon={<PiggyBank className="size-4" />}
               label="Presupuestos"
+            />
+            <Row
+              href="/goals"
+              icon={<Target className="size-4" />}
+              label="Metas de ahorro"
             />
             <Row
               href="/reports"
