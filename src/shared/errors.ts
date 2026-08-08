@@ -38,6 +38,8 @@ export const API_ERROR_CODES = [
   "RATE_LIMITED",
   // 500
   "INTERNAL_ERROR",
+  // 502
+  "UPSTREAM_FAILED",
 ] as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
@@ -80,6 +82,15 @@ export const HTTP_STATUS_BY_CODE: Readonly<Record<ApiErrorCode, number>> = {
 
   UNPROCESSABLE: 422,
   RATE_LIMITED: 429,
+
+  /**
+   * Un servicio del que dependemos falló: el proveedor de mail, típicamente.
+   * Es 502 y no 500 porque la petición estaba bien y el servidor funciona — lo
+   * que falló está afuera. La distinción importa para quien mira los logs: un
+   * 500 dice "hay un bug", un 502 dice "revisá la configuración del proveedor".
+   */
+  UPSTREAM_FAILED: 502,
+
   INTERNAL_ERROR: 500,
 };
 

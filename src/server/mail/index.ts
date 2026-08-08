@@ -2,6 +2,7 @@ import { createTransport, type Transporter } from "nodemailer";
 import { Resend } from "resend";
 
 import { env } from "@/env";
+import { ApiError } from "@/server/api/errors";
 import { logger } from "@/server/logger";
 import { maskEmail } from "@/shared/email";
 
@@ -43,15 +44,45 @@ class SmtpMailer implements Mailer {
   }
 
   public async send(message: MailMessage): Promise<void> {
-    await this.transporter.sendMail({
-      from: env.MAIL_FROM,
-      to: message.to,
-      subject: message.subject,
-      html: message.html,
-      text: message.text,
-    });
+    try {
+      await this.transporter.sendMail({
+        from: env.MAIL_FROM,
+        to: message.to,
+        subject: message.subject,
+        html: message.html,
+        text: message.text,
+      });
+    } catch (error) {
+      logger.error(
+        {
+          to: maskEmail(message.to),
+          error: error instanceof Error ? error.message : "desconocido",
+        },
+        "falló el envío de mail",
+      );
+      throw mailFailure();
+    }
   }
 }
+
+/**
+ * Un proveedor de mail caído o mal configurado NO es un bug del servidor.
+ *
+ * Antes se tiraba un `Error` pelado y el wrapper de handlers lo trataba como
+ * "error no controlado": 500 con stack trace en los logs y un "algo salió mal
+ * de nuestro lado" para quien mira la pantalla. Los dos mienten. La petición
+ * estaba bien, el servidor funciona, y lo que hay que hacer es revisar la
+ * configuración del proveedor — cosa que ni el código HTTP ni el mensaje
+ * dejaban entrever.
+ *
+ * El detalle del proveedor va en el log, no en la respuesta: puede incluir la
+ * clave de API o el dominio de envío.
+ */
+const mailFailure = (): ApiError =>
+  new ApiError(
+    "UPSTREAM_FAILED",
+    "No se pudo enviar el mail. Revisá la configuración del proveedor de correo",
+  );
 
 class ResendMailer implements Mailer {
   private readonly client: Resend;
@@ -76,7 +107,7 @@ class ResendMailer implements Mailer {
         { to: maskEmail(message.to), error: error.message },
         "falló el envío de mail",
       );
-      throw new Error(`No se pudo enviar el mail: ${error.message}`);
+      throw mailFailure();
     }
   }
 }
