@@ -75,7 +75,9 @@ export function SpaceSwitcher({
           <DrawerTitle>Cambiar de espacio</DrawerTitle>
         </DrawerHeader>
 
-        <ul className="px-4 pb-2">
+        {/* La lista scrollea y el botón de abajo queda fijo: con muchos
+            espacios, "crear" no se puede ir fuera de la pantalla. */}
+        <ul className="app-scroll min-h-0 px-4 pb-2">
           {spaces.map((item) => (
             <li key={item.id}>
               <button

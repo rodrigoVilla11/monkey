@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Drawer,
+  DrawerBody,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
@@ -19,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api-client";
+import { toMinor } from "@/lib/format";
 import { useCategories } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
@@ -198,7 +200,7 @@ function NewBudgetSheet({
           <DrawerTitle>Nuevo presupuesto</DrawerTitle>
         </DrawerHeader>
 
-        <div className="app-scroll space-y-4 px-4 pb-6">
+        <DrawerBody className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="budget-name">Nombre</Label>
             <Input
@@ -331,19 +333,8 @@ function NewBudgetSheet({
               "Crear presupuesto"
             )}
           </Button>
-        </div>
+        </DrawerBody>
       </DrawerContent>
     </Drawer>
   );
 }
-
-/**
- * Convierte unidades mayores a mínimas con enteros, sin `parseFloat`.
- * "12,5" con 2 decimales → "1250". Redondear con float daría 1249 en algunos
- * importes, que en un tope de gasto es un error que se nota.
- */
-const toMinor = (input: string, exponent: number): string => {
-  const [whole = "0", fraction = ""] = input.replace(",", ".").split(".");
-  const padded = fraction.slice(0, exponent).padEnd(exponent, "0");
-  return String(BigInt(`${whole === "" ? "0" : whole}${padded}`));
-};

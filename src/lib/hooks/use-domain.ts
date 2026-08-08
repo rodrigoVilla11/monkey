@@ -12,6 +12,7 @@ import { queryKeys, spaceScopeKey } from "@/lib/query-keys";
 import type {
   AccountWithBalance,
   CreateAccountRequest,
+  UpdateAccountRequest,
 } from "@/shared/contracts/accounts";
 import type { CategoryTreeNode } from "@/shared/contracts/categories";
 import type { Page } from "@/shared/contracts/common";
@@ -164,6 +165,27 @@ export const useCreateAccount = (spaceId: string) => {
   return useMutation({
     mutationFn: (input: CreateAccountRequest) =>
       api.post(`/spaces/${spaceId}/accounts`, input),
+    onSuccess: invalidate,
+  });
+};
+
+export const useUpdateAccount = (spaceId: string) => {
+  const invalidate = useInvalidateSpace(spaceId);
+
+  return useMutation({
+    mutationFn: ({ id, ...input }: UpdateAccountRequest & { id: string }) =>
+      api.patch(`/spaces/${spaceId}/accounts/${id}`, input),
+    // Se invalida el Space entero y no solo la lista de cuentas: cambiar el
+    // saldo inicial o sacarla del inicio mueve el patrimonio del dashboard.
+    onSuccess: invalidate,
+  });
+};
+
+export const useDeleteAccount = (spaceId: string) => {
+  const invalidate = useInvalidateSpace(spaceId);
+
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/spaces/${spaceId}/accounts/${id}`),
     onSuccess: invalidate,
   });
 };

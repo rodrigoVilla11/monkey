@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Drawer,
+  DrawerBody,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
@@ -17,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, api } from "@/lib/api-client";
-import { formatMoneyDTO } from "@/lib/format";
+import { formatMoneyDTO, toMinor } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
@@ -336,7 +337,7 @@ function NewGoalSheet({
           <DrawerTitle>Nueva meta</DrawerTitle>
         </DrawerHeader>
 
-        <div className="app-scroll space-y-4 px-4 pb-6">
+        <DrawerBody className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="goal-name">Nombre</Label>
             <Input
@@ -420,15 +421,8 @@ function NewGoalSheet({
               "Crear meta"
             )}
           </Button>
-        </div>
+        </DrawerBody>
       </DrawerContent>
     </Drawer>
   );
 }
-
-/** Unidades mayores a mínimas con enteros, sin `parseFloat`. */
-const toMinor = (input: string, exponent: number): string => {
-  const [whole = "0", fraction = ""] = input.replace(",", ".").split(".");
-  const padded = fraction.slice(0, exponent).padEnd(exponent, "0");
-  return String(BigInt(`${whole === "" ? "0" : whole}${padded}`));
-};

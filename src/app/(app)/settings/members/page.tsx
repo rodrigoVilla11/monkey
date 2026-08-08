@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Drawer,
+  DrawerBody,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
@@ -228,7 +229,7 @@ function InviteSheet({
           <DrawerTitle>Invitar a alguien</DrawerTitle>
         </DrawerHeader>
 
-        <div className="space-y-4 px-4 pb-6">
+        <DrawerBody className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="invite-email">Email</Label>
             <Input
@@ -288,7 +289,7 @@ function InviteSheet({
             La invitación vence en 7 días y solo la puede aceptar esa dirección
             de email.
           </p>
-        </div>
+        </DrawerBody>
       </DrawerContent>
     </Drawer>
   );

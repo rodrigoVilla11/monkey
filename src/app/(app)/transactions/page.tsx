@@ -9,6 +9,7 @@ import { TransactionList } from "@/components/transactions/transaction-list";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
+  DrawerBody,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
@@ -158,7 +159,7 @@ export default function TransactionsPage() {
             <DrawerTitle>Filtros</DrawerTitle>
           </DrawerHeader>
 
-          <div className="app-scroll space-y-5 px-4 pb-6">
+          <DrawerBody className="space-y-5">
             <FilterGroup label="Tipo">
               {(["EXPENSE", "INCOME"] as const).map((type) => (
                 <Chip
@@ -280,7 +281,7 @@ export default function TransactionsPage() {
             >
               Ver resultados
             </Button>
-          </div>
+          </DrawerBody>
         </DrawerContent>
       </Drawer>
     </div>
@@ -326,7 +327,7 @@ function TransactionDetail({
         </DrawerHeader>
 
         {transaction !== null && (
-          <div className="app-scroll space-y-5 px-4 pb-6">
+          <DrawerBody className="space-y-5">
             <div className="flex items-baseline justify-between">
               <span
                 className={cn(
@@ -379,7 +380,7 @@ function TransactionDetail({
               locale={locale}
               canEdit={canEdit}
             />
-          </div>
+          </DrawerBody>
         )}
       </DrawerContent>
     </Drawer>

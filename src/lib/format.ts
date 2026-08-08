@@ -94,3 +94,44 @@ export const initials = (name: string): string =>
  */
 export const digitsToMinor = (digits: string): bigint =>
   digits === "" ? 0n : BigInt(digits);
+
+/**
+ * Convierte lo tecleado en un input de texto a unidades mínimas.
+ *
+ * Con enteros y sin `parseFloat`: "12,5" con 2 decimales es "1250", y
+ * redondear con float daría 1249 en algunos importes. Acepta coma o punto
+ * porque en España y en Argentina se escribe con coma.
+ *
+ * Los decimales de más se cortan, no se redondean: quien tecleó "10,999" en
+ * euros quiso decir 10,99 y no 11,00 — la app no le corrige el importe.
+ */
+export const toMinor = (input: string, exponent: number): string => {
+  const trimmed = input.trim().replace(",", ".");
+  const negative = trimmed.startsWith("-");
+  const unsigned = negative ? trimmed.slice(1) : trimmed;
+  const [whole = "", fraction = ""] = unsigned.split(".");
+  const padded = fraction.slice(0, exponent).padEnd(exponent, "0");
+  const value = BigInt(`${whole === "" ? "0" : whole}${padded}`);
+  return String(negative ? -value : value);
+};
+
+/** Lo que `toMinor` sabe leer. Un importe vacío no cuenta. */
+export const isAmountInput = (input: string): boolean =>
+  /^-?(\d+([.,]\d*)?|[.,]\d+)$/.test(input.trim());
+
+/**
+ * El camino inverso, para precargar un formulario de edición.
+ *
+ * Devuelve un string editable ("-12.5"), no uno formateado: meter separadores
+ * de miles en un input hace que el siguiente tecleo lo rompa.
+ */
+export const minorToInput = (amountMinor: string, exponent: number): string => {
+  const value = BigInt(amountMinor);
+  const sign = value < 0n ? "-" : "";
+  const digits = (value < 0n ? -value : value)
+    .toString()
+    .padStart(exponent + 1, "0");
+  const whole = digits.slice(0, digits.length - exponent);
+  const fraction = exponent === 0 ? "" : `.${digits.slice(-exponent)}`;
+  return `${sign}${whole}${fraction}`;
+};
