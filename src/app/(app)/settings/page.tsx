@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Sun,
   Target,
+  Upload,
   Users,
 } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -110,6 +111,11 @@ export default function SettingsPage() {
             href="/settings/sessions"
             icon={<ShieldCheck className="size-4" />}
             label="Sesiones activas"
+          />
+          <Row
+            href="/settings/data"
+            icon={<Upload className="size-4" />}
+            label="Importar y exportar"
           />
 
           <div className="flex min-h-touch items-center justify-between px-4 py-3">

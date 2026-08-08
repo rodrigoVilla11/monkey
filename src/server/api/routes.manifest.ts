@@ -298,6 +298,22 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "La operación más destructiva del dominio: ADMIN y auditada",
   },
 
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/transactions/export",
+    auth: "verified",
+    minRole: "VIEWER",
+    note: "Devuelve text/csv, no JSON",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/transactions/import",
+    auth: "verified",
+    minRole: "MEMBER",
+    rateLimited: true,
+    note: "Con dryRun no escribe: la previsualización es el mismo camino",
+  },
+
   // ── transferencias ───────────────────────────────────────────────────────
   {
     method: "POST",

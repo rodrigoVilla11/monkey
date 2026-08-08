@@ -38,7 +38,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | -------------------------- | ------ |
 | 13 · Metas de ahorro       | ✅     |
 | 14 · Deudas                | ✅     |
-| 15 · Importar/exportar CSV | ⏳     |
+| 15 · Importar/exportar CSV | ✅     |
 | 16 · Adjuntos              | ⏳     |
 | 17 · División de gastos    | ⏳     |
 
@@ -416,6 +416,16 @@ pantalla no promete lo contrario.
   sola y el saldo cuadra contra el extracto.
 - **Un movimiento recurrente atrasado se materializa con SU fecha**, no con la
   del día en que corrió el job. Ver abajo.
+- **Importar es en dos pasos, y el primero no puede mentir.** La
+  previsualización usa el MISMO endpoint con `dryRun`: recorre parseo,
+  validación, duplicados y resolución de categorías, y solo se salta la
+  escritura. Si dice que entran 47, entran 47. Y la regla de qué rechaza: **la
+  plata que se movió entra**. Una categoría que no existe es una etiqueta que
+  falta, no una razón para descartar un gasto — la fila entra sin categoría y se
+  avisa. Una fecha o un importe ilegibles sí son errores.
+- **El CSV exportado lleva el ID interno** en la primera columna. Es lo que hace
+  exacta la ida y vuelta: reimportarlo no duplica nada. Un ID de otra
+  instalación no coincide con nada y cae en la detección normal de duplicados.
 - **Las deudas registran, no amortizan.** El saldo es `original − pagos`, sin
   capitalizar intereses. Calcular la cuota de un préstamo daría un número que no
   coincide con el recibo del banco —convenciones de días, comisiones, seguros,

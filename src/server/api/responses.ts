@@ -70,4 +70,30 @@ export const noContent = (cookies: readonly string[] = []): NextResponse => {
   return response;
 };
 
+/**
+ * Descarga de un archivo generado.
+ *
+ * Vive acá y no en el handler que la usa porque la cabecera
+ * `Content-Disposition` tiene una trampa: un nombre con comillas o saltos de
+ * línea permite inyectar cabeceras. El nombre se sanea en un solo lugar.
+ *
+ * `no-store` porque lo que se descarga son datos financieros del usuario: no
+ * pueden quedar en el caché de un proxy compartido.
+ */
+export const attachment = (
+  content: string,
+  options: { readonly filename: string; readonly contentType: string },
+): NextResponse => {
+  const safeName = options.filename.replace(/["\r\n\\]/g, "");
+
+  return new NextResponse(content, {
+    status: 200,
+    headers: {
+      "content-type": options.contentType,
+      "content-disposition": `attachment; filename="${safeName}"`,
+      "cache-control": "no-store",
+    },
+  });
+};
+
 export { serialize as serializeForJson };
