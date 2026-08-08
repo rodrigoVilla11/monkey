@@ -69,11 +69,50 @@ COPY --from=builder --chown=monkey:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=monkey:nodejs /app/public ./public
 
 # `prisma migrate deploy` corre en el arranque del contenedor, así que el
-# runtime necesita el CLI y el schema. Es lo único que sobrevive del builder
-# además del bundle.
+# runtime necesita el schema y las migraciones.
 COPY --from=builder --chown=monkey:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=monkey:nodejs /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder --chown=monkey:nodejs /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+
+# ── El CLI de Prisma, aparte ─────────────────────────────────────────────────
+#
+# NO se copia `node_modules/prisma` del builder: el CLI de Prisma 7 depende de
+# @prisma/config y @prisma/engines, que con el layout de pnpm viven fuera de esa
+# carpeta. Copiarla sola deja un CLI que revienta con MODULE_NOT_FOUND en el
+# primer arranque — y en un orquestador eso es un bucle de reinicio.
+#
+# Se instala con npm en un prefijo propio para que resuelva su árbol completo y
+# para que no pueda tocar el node_modules del bundle standalone, que Next armó
+# con un trace exacto.
+# `openssl` no viene en bookworm-slim y el motor de esquema lo busca: sin él
+# avisa que no detecta la versión de libssl y cae a un binario de reserva.
+# Funciona igual, pero un aviso en cada arranque de producción es ruido que
+# tapa los avisos que sí importan.
+ARG PRISMA_VERSION=7.9.1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install --global --no-fund --no-audit prisma@${PRISMA_VERSION} \
+ && npm cache clean --force
+
+# El CLI arrastra Studio y drivers de otras bases que `migrate deploy` nunca
+# usa, y son ~250 MB. NO se pueden borrar: el CLI hace `require` de
+# `@prisma/studio-core/data/bff` al arrancar, pase lo que pase, y el contenedor
+# entra en bucle de reinicio. Probado.
+#
+# El precio es una imagen de ~790 MB en vez de ~470. Se paga a cambio de que el
+# esquema se migre solo al desplegar, que es lo que evita el error de operación
+# más caro que hay: servir tráfico contra una base desactualizada.
+
+# Config mínima para el CLI. La del repo es TypeScript e importa `dotenv`, que
+# en el runtime no está: acá las variables ya vienen del entorno del contenedor.
+COPY --chown=monkey:nodejs <<'EOF' /app/prisma.config.js
+const path = require("node:path");
+
+module.exports = {
+  schema: path.join(__dirname, "prisma", "schema.prisma"),
+  migrations: { path: path.join(__dirname, "prisma", "migrations") },
+  datasource: { url: process.env.DATABASE_URL ?? "" },
+};
+EOF
 
 # Adjuntos con STORAGE_DRIVER=local (Fase 3). Montar como volumen.
 RUN mkdir -p /app/var/uploads && chown -R monkey:nodejs /app/var
@@ -84,4 +123,12 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "server.js"]
+# Las migraciones se aplican ANTES de servir tráfico, y van en la imagen y no en
+# el `command` del compose a propósito: así la imagen se basta sola en cualquier
+# orquestador —EasyPanel, Swarm, Kubernetes— sin depender de que alguien acierte
+# a sobrescribir el comando de arranque.
+#
+# `migrate deploy` solo aplica migraciones ya versionadas: nunca genera ni
+# infiere nada. Y toma un lock de Postgres, así que dos réplicas arrancando a la
+# vez no se pisan.
+CMD ["sh", "-c", "prisma migrate deploy && exec node server.js"]

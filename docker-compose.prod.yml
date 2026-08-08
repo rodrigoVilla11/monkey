@@ -46,10 +46,8 @@ services:
       # Adjuntos con STORAGE_DRIVER=local (Fase 3). Cuando esto pase a S3/R2 el
       # volumen se puede sacar sin tocar código: está detrás de una interfaz.
       - uploads:/app/var/uploads
-    # Las migraciones se aplican antes de servir tráfico. `migrate deploy` solo
-    # aplica migraciones ya versionadas: nunca genera ni infiere nada.
-    command: >
-      sh -c "node_modules/.bin/prisma migrate deploy && node server.js"
+    # Sin `command`: las migraciones ya van en el CMD de la imagen, para que se
+    # baste sola en cualquier orquestador.
 
 volumes:
   postgres-data:
