@@ -80,7 +80,9 @@ openssl rand -base64 48                                  # macOS / Linux / Git B
 ```
 
 ```powershell
-[Convert]::ToBase64String((1..48 | % { Get-Random -Max 256 }))   # PowerShell
+# PowerShell. `Get-Random` NO sirve para esto: no es un generador criptográfico
+# y este secreto firma todos los JWT de la app.
+[Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
 ```
 
 ```bash
