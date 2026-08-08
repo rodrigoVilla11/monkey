@@ -3,6 +3,7 @@
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { AttachmentsPanel } from "@/components/transactions/attachments-panel";
 import { TransactionList } from "@/components/transactions/transaction-list";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,13 @@ import {
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { useDebounced } from "@/lib/hooks/use-debounced";
 import { cn } from "@/lib/utils";
-import type { TransactionFilters } from "@/shared/contracts/transactions";
+import { formatSignedAmount } from "@/lib/format";
+import { formatCalendarDate } from "@/shared/dates";
+import { hasAtLeast } from "@/shared/roles";
+import type {
+  TransactionDTO,
+  TransactionFilters,
+} from "@/shared/contracts/transactions";
 
 /**
  * Listado de movimientos con buscador y filtros.
@@ -39,6 +46,7 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<TransactionFilters>({});
   const [showFilters, setShowFilters] = useState(false);
+  const [selected, setSelected] = useState<TransactionDTO | null>(null);
 
   // El buscador espera a que se deje de escribir: sin esto, cada tecla dispara
   // un request y la lista parpadea.
@@ -128,6 +136,17 @@ export default function TransactionsPage() {
         isFetchingNextPage={query.isFetchingNextPage}
         onLoadMore={() => {
           void query.fetchNextPage();
+        }}
+        onSelect={setSelected}
+      />
+
+      <TransactionDetail
+        transaction={selected}
+        spaceId={spaceId}
+        locale={session.data?.locale ?? "es-ES"}
+        canEdit={space !== undefined && hasAtLeast(space.role, "MEMBER")}
+        onClose={() => {
+          setSelected(null);
         }}
       />
 
@@ -262,6 +281,101 @@ export default function TransactionsPage() {
           </div>
         </DrawerContent>
       </Drawer>
+    </div>
+  );
+}
+
+/**
+ * Detalle de un movimiento.
+ *
+ * Existe sobre todo para alojar los adjuntos: el listado ya muestra lo demás y
+ * una pantalla entera para repetirlo no aportaba nada. El recibo, en cambio,
+ * necesita un sitio donde vivir.
+ */
+function TransactionDetail({
+  transaction,
+  spaceId,
+  locale,
+  canEdit,
+  onClose,
+}: {
+  transaction: TransactionDTO | null;
+  spaceId: string;
+  locale: string;
+  canEdit: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Drawer
+      open={transaction !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DrawerContent className="max-h-[85dvh] pb-safe-bottom">
+        <DrawerHeader className="text-left">
+          <DrawerTitle>
+            {transaction?.description ??
+              transaction?.category?.name ??
+              "Movimiento"}
+          </DrawerTitle>
+        </DrawerHeader>
+
+        {transaction !== null && (
+          <div className="app-scroll space-y-5 px-4 pb-6">
+            <div className="flex items-baseline justify-between">
+              <span
+                className={cn(
+                  "text-2xl font-semibold tabular-nums",
+                  transaction.type === "INCOME" && "text-income",
+                )}
+              >
+                {formatSignedAmount(
+                  transaction.amount,
+                  transaction.type,
+                  locale,
+                  transaction.transferDirection,
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {formatCalendarDate(transaction.date, locale, {
+                  dateStyle: "long",
+                })}
+              </span>
+            </div>
+
+            <dl className="space-y-1.5 text-sm">
+              <Detail label="Cuenta" value={transaction.account.name} />
+              {transaction.category !== null && (
+                <Detail label="Categoría" value={transaction.category.name} />
+              )}
+              {transaction.payee !== null && (
+                <Detail label="Beneficiario" value={transaction.payee} />
+              )}
+              <Detail label="Cargado por" value={transaction.author.name} />
+              {transaction.notes !== null && (
+                <Detail label="Notas" value={transaction.notes} />
+              )}
+            </dl>
+
+            <AttachmentsPanel
+              spaceId={spaceId}
+              transactionId={transaction.id}
+              locale={locale}
+              canEdit={canEdit}
+            />
+          </div>
+        )}
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 truncate text-right">{value}</dd>
     </div>
   );
 }

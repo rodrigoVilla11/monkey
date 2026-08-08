@@ -314,6 +314,36 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "Con dryRun no escribe: la previsualización es el mismo camino",
   },
 
+  // ── adjuntos ─────────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]/attachments",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]/attachments",
+    auth: "verified",
+    minRole: "MEMBER",
+    rateLimited: true,
+    note: "multipart/form-data. El tipo se valida por los bytes, no por el Content-Type",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/attachments/[attachmentId]",
+    auth: "verified",
+    minRole: "VIEWER",
+    note: "Sirve el archivo. Reemplaza a una URL firmada: la membresía se comprueba en cada petición",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/attachments/[attachmentId]",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Borrado lógico de la fila, borrado real del archivo",
+  },
+
   // ── transferencias ───────────────────────────────────────────────────────
   {
     method: "POST",

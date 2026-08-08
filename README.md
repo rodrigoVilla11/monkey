@@ -39,7 +39,7 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 13 · Metas de ahorro       | ✅     |
 | 14 · Deudas                | ✅     |
 | 15 · Importar/exportar CSV | ✅     |
-| 16 · Adjuntos              | ⏳     |
+| 16 · Adjuntos              | ✅     |
 | 17 · División de gastos    | ⏳     |
 
 ---
@@ -416,6 +416,20 @@ pantalla no promete lo contrario.
   sola y el saldo cuadra contra el extracto.
 - **Un movimiento recurrente atrasado se materializa con SU fecha**, no con la
   del día en que corrió el job. Ver abajo.
+- **Los adjuntos se sirven por un endpoint autenticado, no por URL firmada.**
+  Una URL firmada es un token en la barra de direcciones: queda en el historial,
+  viaja en el `Referer`, sobrevive a una captura compartida y **no se puede
+  revocar** — sigue funcionando después de expulsar a alguien del Space. Acá la
+  membresía se comprueba en cada petición, y al vivir bajo
+  `/api/v1/spaces/:id/**` el adjunto entra en el mismo borrado de caché por
+  Space que el resto de la API.
+- **El tipo del archivo sale de sus bytes**, nunca del `Content-Type`: lo manda
+  el cliente. Un ejecutable renombrado a `.jpg` y anunciado como `image/jpeg`
+  pasa cualquier validación basada en lo que dice quien sube.
+- **La clave del storage se genera, no se deriva del nombre.** Es la defensa
+  contra el path traversal por construcción y no por saneamiento: si se armara
+  con el nombre del cliente habría que acertar con todas las formas de escribir
+  `..`, y basta fallar una vez.
 - **Importar es en dos pasos, y el primero no puede mentir.** La
   previsualización usa el MISMO endpoint con `dryRun`: recorre parseo,
   validación, duplicados y resolución de categorías, y solo se salta la
