@@ -314,6 +314,47 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "Con dryRun no escribe: la previsualización es el mismo camino",
   },
 
+  // ── reparto de gastos ────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]/split",
+    auth: "verified",
+    minRole: "VIEWER",
+  },
+  {
+    method: "PUT",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]/split",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "PUT y no PATCH: reemplaza el reparto entero para que las partes sigan sumando el importe",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/transactions/[transactionId]/split",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/settlements",
+    auth: "verified",
+    minRole: "VIEWER",
+    note: "Quién le debe a quién, con los pagos mínimos que lo dejan en cero",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/settlements",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "No genera un movimiento: saldar no mueve el patrimonio del Space",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/settlements/[settlementId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+
   // ── adjuntos ─────────────────────────────────────────────────────────────
   {
     method: "GET",

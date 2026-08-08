@@ -29,6 +29,8 @@ export const SPACE_SCOPED_MODELS = [
   "Debt",
   "DebtPayment",
   "Attachment",
+  "TransactionSplit",
+  "Settlement",
 ] as const;
 
 /**

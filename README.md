@@ -40,7 +40,9 @@ entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
 | 14 · Deudas                | ✅     |
 | 15 · Importar/exportar CSV | ✅     |
 | 16 · Adjuntos              | ✅     |
-| 17 · División de gastos    | ⏳     |
+| 17 · División de gastos    | ✅     |
+
+**Fase 3 completa.**
 
 ---
 
@@ -416,6 +418,16 @@ pantalla no promete lo contrario.
   sola y el saldo cuadra contra el extracto.
 - **Un movimiento recurrente atrasado se materializa con SU fecha**, no con la
   del día en que corrió el job. Ver abajo.
+- **Repartir un gasto es una anotación, no una deuda.** Generar una fila de
+  deuda por cada gasto compartido daría cincuenta deudas de siete euros que
+  nadie salda una por una. El saldo entre personas se **calcula** agregando los
+  repartos, y se cancela con un saldado. Ni repartir ni saldar generan un
+  movimiento: el gasto ya estaba cargado, y saldar solo reequilibra quién puso
+  qué dentro del Space — si generara uno, el mes en que se ponen al día
+  parecería el mes de un gasto enorme.
+- **La suma de los saldos es siempre cero**, y hay un test de eso. Es la
+  comprobación de que no se inventó ni se perdió plata entre personas. Los pagos
+  sugeridos son los mínimos: con N personas, N−1 como mucho.
 - **Los adjuntos se sirven por un endpoint autenticado, no por URL firmada.**
   Una URL firmada es un token en la barra de direcciones: queda en el historial,
   viaja en el `Referer`, sobrevive a una captura compartida y **no se puede

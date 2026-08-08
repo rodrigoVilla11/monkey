@@ -185,8 +185,12 @@ model User {
   acceptedInvitations Invitation[]          @relation("InvitationAcceptor")
   auditLogs           AuditLog[]
   transactions        Transaction[]
+  paidTransactions    Transaction[]         @relation("TransactionPayer")
   recurringRules      RecurringRule[]
   attachments         Attachment[]
+  splits              TransactionSplit[]
+  settlementsSent     Settlement[]          @relation("SettlementFrom")
+  settlementsReceived Settlement[]          @relation("SettlementTo")
 
   @@index([deletedAt])
 }
@@ -228,6 +232,8 @@ model Space {
   debts           Debt[]
   debtPayments    DebtPayment[]
   attachments     Attachment[]
+  splits          TransactionSplit[]
+  settlements     Settlement[]
 
   @@index([deletedAt])
 }
@@ -432,6 +438,12 @@ model Transaction {
   createdByUserId String?
   createdByName   String
 
+  /// Quién PUSO la plata, que no es lo mismo que quién cargó el movimiento.
+  /// Null = lo pagó el Space (una cuenta común) y no hay nada que repartir.
+  /// Es la base del reparto de gastos: sin este dato, "quién le debe a quién"
+  /// no se puede calcular.
+  paidByUserId String?
+
   type   TransactionType
   status TransactionStatus @default(CLEARED)
 
@@ -477,11 +489,13 @@ model Transaction {
   /// User NO es scopeado por Space, así que esta queda simple. SetNull para no
   /// dejar transacciones huérfanas; createdByName conserva quién fue.
   createdBy     User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  paidBy        User?          @relation("TransactionPayer", fields: [paidByUserId], references: [id], onDelete: SetNull)
 
   tags            TransactionTag[]
   attachments     Attachment[]
   savingsContribs SavingsContribution[]
   debtPayments    DebtPayment[]
+  splits          TransactionSplit[]
 
   @@unique([spaceId, id])
   @@index([spaceId, date, deletedAt])
@@ -490,6 +504,67 @@ model Transaction {
   @@index([spaceId, createdByUserId, date])
   @@index([spaceId, transferGroupId])
   @@index([recurringRuleId])
+  @@index([spaceId, paidByUserId, date])
+}
+
+/// Cuánto de un gasto le corresponde a cada miembro.
+///
+/// Es una ANOTACIÓN, no una deuda: generar una fila de deuda por cada gasto
+/// compartido daría cincuenta deudas de siete euros que nadie salda una por
+/// una. El saldo entre personas se calcula agregando estos repartos y se salda
+/// con un Settlement.
+///
+/// La suma de los repartos de un movimiento tiene que dar su importe exacto; lo
+/// garantiza el service repartiendo con `allocate`, que no pierde ni un céntimo.
+model TransactionSplit {
+  id            String @id @default(cuid(2))
+  spaceId       String
+  transactionId String
+  /// A quién le toca esta parte. Sin SetNull: si el usuario se va, el reparto
+  /// deja de tener sentido y se borra con él.
+  userId        String
+
+  amountMinor BigInt
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space       Space       @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [spaceId, transactionId], references: [spaceId, id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Un miembro aparece como mucho una vez por movimiento: unique en la
+  /// migración.
+  @@index([spaceId, transactionId])
+  @@index([spaceId, userId])
+}
+
+/// "Estamos a mano": un pago de una persona a otra que cancela lo que se
+/// debían de los gastos compartidos.
+///
+/// No es una Transaction: no mueve el patrimonio del Space, solo reequilibra
+/// quién puso qué dentro de él. Si generara un movimiento, el mes en que se
+/// saldan las cuentas parecería el mes de un gasto enorme.
+model Settlement {
+  id         String @id @default(cuid(2))
+  spaceId    String
+  fromUserId String
+  toUserId   String
+
+  amountMinor BigInt
+  currency    String   @db.Char(3)
+  date        DateTime @db.Date
+  note        String?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  space    Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  fromUser User  @relation("SettlementFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User  @relation("SettlementTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([spaceId, date])
 }
 
 model Tag {

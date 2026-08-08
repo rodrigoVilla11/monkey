@@ -8,6 +8,7 @@ import {
   LogOut,
   Moon,
   PiggyBank,
+  Scale,
   ShieldCheck,
   Sun,
   Target,
@@ -93,6 +94,14 @@ export default function SettingsPage() {
               icon={<HandCoins className="size-4" />}
               label="Deudas y préstamos"
             />
+            {/* Solo tiene sentido con más de una persona. */}
+            {space.memberCount > 1 && (
+              <Row
+                href="/balances"
+                icon={<Scale className="size-4" />}
+                label="Cuentas entre nosotros"
+              />
+            )}
             <Row
               href="/reports"
               icon={<ChartColumn className="size-4" />}

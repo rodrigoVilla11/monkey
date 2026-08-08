@@ -4,6 +4,7 @@ import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AttachmentsPanel } from "@/components/transactions/attachments-panel";
+import { SplitPanel } from "@/components/transactions/split-panel";
 import { TransactionList } from "@/components/transactions/transaction-list";
 import { Button } from "@/components/ui/button";
 import {
@@ -145,6 +146,7 @@ export default function TransactionsPage() {
         spaceId={spaceId}
         locale={session.data?.locale ?? "es-ES"}
         canEdit={space !== undefined && hasAtLeast(space.role, "MEMBER")}
+        isShared={(space?.memberCount ?? 1) > 1}
         onClose={() => {
           setSelected(null);
         }}
@@ -297,12 +299,14 @@ function TransactionDetail({
   spaceId,
   locale,
   canEdit,
+  isShared,
   onClose,
 }: {
   transaction: TransactionDTO | null;
   spaceId: string;
   locale: string;
   canEdit: boolean;
+  isShared: boolean;
   onClose: () => void;
 }) {
   return (
@@ -357,6 +361,17 @@ function TransactionDetail({
                 <Detail label="Notas" value={transaction.notes} />
               )}
             </dl>
+
+            {/* Solo en Spaces compartidos: repartir un gasto con uno mismo no
+                significa nada. */}
+            {isShared && transaction.type === "EXPENSE" && (
+              <SplitPanel
+                spaceId={spaceId}
+                transactionId={transaction.id}
+                locale={locale}
+                canEdit={canEdit}
+              />
+            )}
 
             <AttachmentsPanel
               spaceId={spaceId}
