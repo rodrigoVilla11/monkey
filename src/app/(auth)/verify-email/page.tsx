@@ -46,8 +46,14 @@ function VerifyEmailContent() {
     onSuccess: () => {
       toast.success("Te mandamos un mail nuevo");
     },
-    onError: () => {
-      toast.error("No se pudo reenviar. Probá en un rato");
+    onError: (error: unknown) => {
+      // El 502 del proveedor de correo trae un mensaje accionable; conviene
+      // mostrarlo en vez de un "probá en un rato" que no lleva a ningún lado.
+      toast.error(
+        error instanceof ApiError
+          ? error.message
+          : "No se pudo reenviar. Probá en un rato",
+      );
     },
   });
 
@@ -109,18 +115,39 @@ function VerifyEmailContent() {
     );
   }
 
+  /**
+   * El registro avisa por query cuando la cuenta se creó pero el correo no
+   * salió. Decirlo importa: la alternativa es que la persona espere un mail que
+   * nunca va a llegar y crea que la cuenta no existe.
+   */
+  const mailFailed = params.get("mail") === "failed";
+
   return (
     <div className="flex flex-col items-center gap-4 text-center">
-      <MailCheck className="size-12 text-muted-foreground" />
+      <MailCheck
+        className={
+          mailFailed ? "size-12 text-expense" : "size-12 text-muted-foreground"
+        }
+      />
       <div>
-        <h2 className="text-lg font-semibold">Revisá tu correo</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Te mandamos un enlace a{" "}
-          <span className="text-foreground">
-            {session.data?.email ?? "tu email"}
-          </span>
-          . Vence en 24 horas.
-        </p>
+        <h2 className="text-lg font-semibold">
+          {mailFailed ? "Tu cuenta está creada" : "Revisá tu correo"}
+        </h2>
+        {mailFailed ? (
+          <p className="mt-1 text-sm text-muted-foreground">
+            No pudimos enviarte el mail de verificación: falla el proveedor de
+            correo. Tu cuenta y tus datos están a salvo — probá reenviarlo, y si
+            sigue sin llegar, hay que revisar la configuración del servidor.
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Te mandamos un enlace a{" "}
+            <span className="text-foreground">
+              {session.data?.email ?? "tu email"}
+            </span>
+            . Vence en 24 horas.
+          </p>
+        )}
       </div>
 
       <Button

@@ -48,6 +48,7 @@ export const authResponse = (
   user: SessionUser,
   session: IssuedSession,
   status = 200,
+  extra: Partial<AuthResponse> = {},
 ): NextResponse => {
   const body: AuthResponse = {
     user,
@@ -61,6 +62,7 @@ export const authResponse = (
           },
         }
       : {}),
+    ...extra,
   };
 
   return json(body, { status, cookies: sessionCookies(session) });

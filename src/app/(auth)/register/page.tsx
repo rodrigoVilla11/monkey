@@ -33,8 +33,17 @@ export default function RegisterPage() {
         password,
         ...detectRegion(),
       }),
-    onSuccess: () => {
-      router.replace("/verify-email");
+    onSuccess: (data) => {
+      /**
+       * Si el correo no salió, la pantalla de verificación tiene que decirlo:
+       * la cuenta EXISTE y la sesión está abierta, pero nadie va a recibir
+       * nada. Sin esto, la persona espera un mail que no viene.
+       */
+      router.replace(
+        data.verificationEmailSent === false
+          ? "/verify-email?mail=failed"
+          : "/verify-email",
+      );
     },
   });
 

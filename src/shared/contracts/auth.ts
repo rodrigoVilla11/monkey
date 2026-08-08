@@ -164,6 +164,16 @@ export interface AuthResponse {
    * tokens desde JavaScript.
    */
   readonly tokens?: AuthTokens;
+  /**
+   * Solo en el registro. `false` = la cuenta se creó pero el mail de
+   * verificación no salió (proveedor caído o mal configurado).
+   *
+   * Existe porque la alternativa era peor: antes un fallo de correo hacía
+   * fallar el registro entero cuando la cuenta ya estaba creada, y quien se
+   * registraba veía un error genérico y al reintentar le decían que el email
+   * ya existía.
+   */
+  readonly verificationEmailSent?: boolean;
 }
 
 export interface ActiveSession {

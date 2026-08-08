@@ -22,6 +22,18 @@ import type { RegisterRequest } from "@/shared/contracts/auth";
  * El mail se manda DESPUÉS de que la transacción confirme. Al revés, un
  * rollback dejaría en el buzón un enlace de verificación de una cuenta que no
  * existe.
+ *
+ * ── Y si el mail falla, el registro NO falla ────────────────────────────────
+ *
+ * Esto se aprendió en producción. Antes, un fallo del proveedor de correo hacía
+ * reventar la petición entera: la cuenta quedaba creada —la transacción ya
+ * había confirmado— pero quien se registraba veía "algo salió mal de nuestro
+ * lado", y al reintentar le decían que el email ya estaba en uso. Sin manera de
+ * entender qué había pasado ni de seguir adelante.
+ *
+ * La asimetría manda: la cuenta es lo difícil de deshacer —el email es único—
+ * mientras que el mail es reintentable desde `/verify-email/resend`. Así que el
+ * registro devuelve 201 igual y avisa que el correo no salió.
  */
 
 interface RegisterDeps {
@@ -31,6 +43,12 @@ interface RegisterDeps {
 export interface RegisterResult {
   readonly userId: string;
   readonly spaceId: string;
+  /**
+   * `false` si la cuenta se creó pero el mail de verificación no salió. La
+   * pantalla lo usa para decir qué pasó y ofrecer reenviarlo, en vez de dar por
+   * hecho que el mail está en camino.
+   */
+  readonly verificationEmailSent: boolean;
 }
 
 export const register = async (
@@ -125,12 +143,35 @@ export const register = async (
   });
 
   const url = `${env.APP_URL}/verify-email?token=${verification.plain}`;
-  await deps.mailer.send({
-    to: email,
-    ...verifyEmailTemplate(result.name, url, env.EMAIL_VERIFICATION_TTL_HOURS),
-  });
 
-  return { userId: result.userId, spaceId: result.spaceId };
+  let verificationEmailSent = true;
+
+  try {
+    await deps.mailer.send({
+      to: email,
+      ...verifyEmailTemplate(
+        result.name,
+        url,
+        env.EMAIL_VERIFICATION_TTL_HOURS,
+      ),
+    });
+  } catch {
+    /**
+     * El mailer ya lo logueó con el email enmascarado y el detalle del
+     * proveedor. Acá se traga a propósito: la cuenta existe y tirar ahora
+     * dejaría a la persona con una cuenta que no sabe que tiene.
+     *
+     * El token de verificación sigue vivo y `/verify-email/resend` lo vuelve a
+     * mandar cuando el correo esté arreglado.
+     */
+    verificationEmailSent = false;
+  }
+
+  return {
+    userId: result.userId,
+    spaceId: result.spaceId,
+    verificationEmailSent,
+  };
 };
 
 /**

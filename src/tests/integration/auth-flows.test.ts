@@ -186,6 +186,65 @@ describe("registro", () => {
     expect(user?.timezone).toBe("America/Argentina/Buenos_Aires");
     expect(space?.primaryCurrency).toBe("ARS");
   });
+
+  /**
+   * Regresión de un fallo que apareció en el primer despliegue real.
+   *
+   * El proveedor de correo rechazaba los envíos y el registro entero fallaba
+   * DESPUÉS de que la transacción hubiera confirmado: la cuenta quedaba creada,
+   * quien se registraba veía "algo salió mal de nuestro lado", y al reintentar
+   * le decían que el email ya estaba en uso.
+   */
+  describe("cuando el correo no sale", () => {
+    /** Un mailer que siempre falla, como un proveedor mal configurado. */
+    const brokenMailer = {
+      send: (): Promise<void> =>
+        Promise.reject(new Error("dominio no verificado")),
+    };
+
+    it("la cuenta se crea igual y se avisa que el mail no salió", async () => {
+      const result = await register(
+        { email: "sin-mail@ejemplo.com", password: PASSWORD, name: "Rodrigo" },
+        { mailer: brokenMailer },
+      );
+
+      expect(result.verificationEmailSent).toBe(false);
+
+      // Lo que importa: la cuenta EXISTE y es usable.
+      const user = await testDb.user.findUnique({
+        where: { id: result.userId },
+      });
+      expect(user?.email).toBe("sin-mail@ejemplo.com");
+    });
+
+    it("el Space personal y sus categorías se crean igual", async () => {
+      const { spaceId } = await register(
+        { email: "sin-mail2@ejemplo.com", password: PASSWORD, name: "Rodrigo" },
+        { mailer: brokenMailer },
+      );
+
+      const categories = await testDb.category.count({ where: { spaceId } });
+      expect(categories).toBeGreaterThan(0);
+    });
+
+    it("el token de verificación queda vivo para reenviarlo después", async () => {
+      // Es lo que hace que el fallo sea recuperable sin tocar la base.
+      const { userId } = await register(
+        { email: "sin-mail3@ejemplo.com", password: PASSWORD, name: "Rodrigo" },
+        { mailer: brokenMailer },
+      );
+
+      const tokens = await testDb.verificationToken.count({
+        where: { userId, type: "EMAIL_VERIFICATION", usedAt: null },
+      });
+      expect(tokens).toBe(1);
+    });
+
+    it("con el correo funcionando, avisa que sí salió", async () => {
+      const result = await createAccount("con-mail@ejemplo.com");
+      expect(result.verificationEmailSent).toBe(true);
+    });
+  });
 });
 
 describe("verificación de email", () => {

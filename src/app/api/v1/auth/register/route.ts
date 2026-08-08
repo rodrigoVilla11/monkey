@@ -23,15 +23,25 @@ export const runtime = "nodejs";
 export const POST = route<RegisterRequest>(
   { body: registerRequestSchema, rateLimit: RATE_LIMITS.register },
   async ({ request, body, ip, logger }) => {
-    const { userId } = await register(body, { mailer: getMailer() });
+    const { userId, verificationEmailSent } = await register(body, {
+      mailer: getMailer(),
+    });
 
-    logger.info({ userId }, "usuario registrado");
+    logger.info({ userId, verificationEmailSent }, "usuario registrado");
 
     const { session } = await login(
       { email: body.email, password: body.password },
       { userAgent: request.headers.get("user-agent") ?? undefined, ip },
     );
 
-    return authResponse(request, await getProfile(userId), session, 201);
+    /**
+     * 201 aunque el mail no haya salido: la cuenta existe y la sesión está
+     * abierta. El flag deja que la pantalla diga la verdad —"tu cuenta está
+     * creada, pero no pudimos mandarte el correo"— en vez de fingir que está
+     * en camino o, peor, fallar sobre una cuenta ya creada.
+     */
+    return authResponse(request, await getProfile(userId), session, 201, {
+      verificationEmailSent,
+    });
   },
 );
