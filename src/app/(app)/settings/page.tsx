@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowLeftRight,
   CalendarClock,
   ChartColumn,
   ChevronRight,
@@ -106,6 +107,11 @@ export default function SettingsPage() {
               href="/reports"
               icon={<ChartColumn className="size-4" />}
               label="Reportes"
+            />
+            <Row
+              href="/settings/rates"
+              icon={<ArrowLeftRight className="size-4" />}
+              label="Cotizaciones"
             />
           </Card>
         </section>

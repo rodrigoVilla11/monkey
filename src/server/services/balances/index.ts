@@ -30,10 +30,21 @@ export interface AccountBalance {
  */
 export const accountBalances = async (
   db: ScopedDb,
-  options: { readonly includeArchived?: boolean } = {},
+  options: {
+    readonly includeArchived?: boolean;
+    /**
+     * Solo las cuentas que cuentan para el inicio. Lo usa el patrimonio neto:
+     * una cuenta apartada del inicio no puede mover el total, o el número
+     * dejaría de explicarse mirando la lista de abajo.
+     */
+    readonly onlyInNetWorth?: boolean;
+  } = {},
 ): Promise<Map<string, AccountBalance>> => {
   const accounts = await db.account.findMany({
-    where: options.includeArchived === true ? {} : { isArchived: false },
+    where: {
+      ...(options.includeArchived === true ? {} : { isArchived: false }),
+      ...(options.onlyInNetWorth === true ? { includeInNetWorth: true } : {}),
+    },
     select: { id: true, currency: true, initialBalanceMinor: true },
   });
 

@@ -8,6 +8,7 @@ import {
   createAccountRequestSchema,
   type CreateAccountRequest,
 } from "@/shared/contracts/accounts";
+import { todayIn } from "@/shared/dates";
 
 export const runtime = "nodejs";
 
@@ -20,15 +21,30 @@ const paramsSchema = z.object({
 });
 type Params = z.infer<typeof paramsSchema>;
 
-/** GET — cuentas con su saldo calculado. Cualquier miembro. */
+/**
+ * GET — cuentas con su saldo calculado. Cualquier miembro.
+ *
+ * Las que están en otra moneda traen además el saldo convertido a la primaria
+ * del Space, al tipo de HOY. Convertir al tipo de hoy es correcto acá y no lo
+ * sería en un reporte: un saldo es una posición actual, mientras que el gasto
+ * de enero es un hecho pasado que quedó congelado a su cotización.
+ */
 export const GET = route<undefined, Params>(
   { params: paramsSchema, space: { minRole: "VIEWER" } },
-  async ({ params, db }) =>
-    json({
+  async ({ params, access, db }) => {
+    const space = await systemClient().space.findUniqueOrThrow({
+      where: { id: access.spaceId },
+      select: { primaryCurrency: true, timezone: true },
+    });
+
+    return json({
       accounts: await listAccounts(db, {
         includeArchived: params.includeArchived,
+        primaryCurrency: space.primaryCurrency,
+        today: todayIn(space.timezone),
       }),
-    }),
+    });
+  },
 );
 
 /** POST — MEMBER o superior. Un VIEWER no carga nada. */

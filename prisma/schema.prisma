@@ -375,6 +375,17 @@ model Account {
   sortOrder  Int     @default(0)
   isArchived Boolean @default(false)
 
+  /// Si la cuenta cuenta para el inicio: aparece en la lista del dashboard Y
+  /// suma al patrimonio neto.
+  ///
+  /// Es UN interruptor y no dos —"ocultar" y "no sumar" por separado— a
+  /// propósito: una cuenta escondida que igual moviera el total dejaría un
+  /// patrimonio que no se puede explicar mirando la pantalla.
+  ///
+  /// Sus movimientos siguen contando en reportes y presupuestos: esto decide
+  /// qué es "lo mío de todos los días", no qué existe.
+  includeInNetWorth Boolean @default(true)
+
   /// Solo para CREDIT_CARD. Rango 1..31 forzado por CHECK en la migración.
   creditClosingDay Int?
   creditDueDay     Int?

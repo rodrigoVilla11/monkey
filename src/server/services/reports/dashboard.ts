@@ -95,7 +95,9 @@ const computeNetWorth = async (
   primaryCurrency: string,
   today: CalendarDate,
 ): Promise<NetWorth> => {
-  const balances = await accountBalances(db);
+  // Solo las cuentas marcadas para el inicio: el total tiene que poder
+  // explicarse sumando la lista que se ve justo debajo.
+  const balances = await accountBalances(db, { onlyInNetWorth: true });
 
   const totals = new Map<string, bigint>();
   for (const balance of balances.values()) {
@@ -296,7 +298,7 @@ const accountSummaries = async (
   db: ScopedDb,
 ): Promise<AccountBalanceSummary[]> => {
   const rows = await db.account.findMany({
-    where: { isArchived: false },
+    where: { isArchived: false, includeInNetWorth: true },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     select: {
       id: true,

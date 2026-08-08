@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Icons from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -15,7 +16,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError } from "@/lib/api-client";
+import { Switch } from "@/components/ui/switch";
+import { ApiError, api } from "@/lib/api-client";
 import { formatMoneyDTO } from "@/lib/format";
 import {
   useAccounts,
@@ -23,12 +25,15 @@ import {
   useCreateAccount,
 } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
+import { spaceScopeKey } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import {
   ACCOUNT_TYPES,
   ACCOUNT_TYPE_LABELS,
   type AccountType,
+  type AccountWithBalance,
 } from "@/shared/contracts/accounts";
+import { SUGGESTED_CURRENCIES } from "@/shared/currency";
 import { hasAtLeast } from "@/shared/roles";
 
 export default function AccountsPage() {
@@ -95,6 +100,13 @@ export default function AccountsPage() {
                   {account.transactionCount > 0 &&
                     ` · ${String(account.transactionCount)} mov.`}
                 </p>
+                {/* Solo se dice cuando NO cuenta: lo normal es que sí, y
+                    repetirlo en cada fila sería ruido. */}
+                {!account.includeInNetWorth && (
+                  <p className="text-xs text-muted-foreground">
+                    Fuera del inicio
+                  </p>
+                )}
               </div>
 
               <div className="text-right">
@@ -106,27 +118,38 @@ export default function AccountsPage() {
                 >
                   {formatMoneyDTO(account.balance, locale)}
                 </p>
+                {/* El equivalente en la moneda del Space, al tipo de hoy. Va
+                    debajo y en pequeño: el saldo REAL es el de arriba, este es
+                    una referencia. */}
+                {account.balancePrimary !== null && (
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    ≈ {formatMoneyDTO(account.balancePrimary, locale)}
+                  </p>
+                )}
                 {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      archive.mutate(
-                        { id: account.id, archived: !account.isArchived },
-                        {
-                          onSuccess: () => {
-                            toast.success(
-                              account.isArchived
-                                ? "Cuenta restaurada"
-                                : "Cuenta archivada",
-                            );
+                  <div className="flex justify-end gap-3">
+                    <NetWorthToggle spaceId={spaceId} account={account} />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        archive.mutate(
+                          { id: account.id, archived: !account.isArchived },
+                          {
+                            onSuccess: () => {
+                              toast.success(
+                                account.isArchived
+                                  ? "Cuenta restaurada"
+                                  : "Cuenta archivada",
+                              );
+                            },
                           },
-                        },
-                      );
-                    }}
-                    className="text-xs text-muted-foreground underline underline-offset-4"
-                  >
-                    {account.isArchived ? "Restaurar" : "Archivar"}
-                  </button>
+                        );
+                      }}
+                      className="text-xs text-muted-foreground underline underline-offset-4"
+                    >
+                      {account.isArchived ? "Restaurar" : "Archivar"}
+                    </button>
+                  </div>
                 )}
               </div>
             </Card>
@@ -154,6 +177,57 @@ export default function AccountsPage() {
   );
 }
 
+/**
+ * Sacar o devolver una cuenta al inicio, sin abrir nada.
+ *
+ * Va en la propia fila y no en un formulario aparte porque es una decisión que
+ * se cambia de opinión: "esta cuenta no la quiero en el resumen del día a día"
+ * es algo que uno prueba y revierte.
+ */
+function NetWorthToggle({
+  spaceId,
+  account,
+}: {
+  spaceId: string;
+  account: AccountWithBalance;
+}) {
+  const queryClient = useQueryClient();
+
+  const toggle = useMutation({
+    mutationFn: () =>
+      api.patch(`/spaces/${spaceId}/accounts/${account.id}`, {
+        includeInNetWorth: !account.includeInNetWorth,
+      }),
+    onSuccess: () => {
+      toast.success(
+        account.includeInNetWorth
+          ? "Fuera del inicio"
+          : "Vuelve a contar en el inicio",
+      );
+      // Se invalida el Space entero: esto cambia el patrimonio del dashboard.
+      void queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof ApiError ? error.message : "No se pudo cambiar",
+      );
+    },
+  });
+
+  return (
+    <button
+      type="button"
+      disabled={toggle.isPending}
+      onClick={() => {
+        toggle.mutate();
+      }}
+      className="text-xs text-muted-foreground underline underline-offset-4"
+    >
+      {account.includeInNetWorth ? "Sacar del inicio" : "Volver al inicio"}
+    </button>
+  );
+}
+
 function NewAccountSheet({
   open,
   onOpenChange,
@@ -167,15 +241,28 @@ function NewAccountSheet({
 }) {
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("BANK");
+  const [currency, setCurrency] = useState(defaultCurrency);
+  const [includeInNetWorth, setIncludeInNetWorth] = useState(true);
   const create = useCreateAccount(spaceId);
+
+  /**
+   * La del Space primero: es la que se elige casi siempre y tenerla que buscar
+   * entre once sería absurdo.
+   */
+  const currencyOptions = [
+    defaultCurrency,
+    ...SUGGESTED_CURRENCIES.filter((option) => option !== defaultCurrency),
+  ];
 
   const submit = (): void => {
     create.mutate(
-      { name, type },
+      { name, type, currency, includeInNetWorth },
       {
         onSuccess: () => {
           toast.success("Cuenta creada");
           setName("");
+          setCurrency(defaultCurrency);
+          setIncludeInNetWorth(true);
           onOpenChange(false);
         },
         onError: (error: unknown) => {
@@ -231,10 +318,55 @@ function NewAccountSheet({
             </div>
           </div>
 
-          <p className="text-xs text-muted-foreground">
-            La moneda será {defaultCurrency}, la del espacio. Podés crear
-            cuentas en otra moneda desde el detalle.
-          </p>
+          <div className="space-y-1.5">
+            <Label>Moneda</Label>
+            <div className="flex flex-wrap gap-2">
+              {currencyOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => {
+                    setCurrency(option);
+                  }}
+                  aria-pressed={currency === option}
+                  className={cn(
+                    "min-h-touch rounded-full border px-3 text-sm tabular-nums",
+                    currency === option &&
+                      "border-primary bg-primary text-primary-foreground",
+                  )}
+                >
+                  {option}
+                  {option === defaultCurrency && " ·"}
+                </button>
+              ))}
+            </div>
+            {currency !== defaultCurrency && (
+              <p className="text-xs text-muted-foreground">
+                El saldo se guarda en {currency}. En el inicio se muestra
+                convertido a {defaultCurrency} con la última cotización que
+                tengas cargada — si falta, lo dice en vez de inventarla.
+              </p>
+            )}
+          </div>
+
+          {/* Interruptor único: aparecer en el inicio y sumar al patrimonio son
+              lo mismo. Separarlos daría un total imposible de explicar mirando
+              la lista. */}
+          <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div className="min-w-0">
+              <Label htmlFor="account-networth">Contar en el inicio</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Si lo desactivás, la cuenta no aparece en el resumen ni suma al
+                patrimonio. Sus movimientos siguen contando en reportes y
+                presupuestos.
+              </p>
+            </div>
+            <Switch
+              id="account-networth"
+              checked={includeInNetWorth}
+              onCheckedChange={setIncludeInNetWorth}
+            />
+          </div>
 
           <Button
             className="min-h-touch w-full"

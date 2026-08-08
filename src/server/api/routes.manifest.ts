@@ -314,6 +314,28 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "Con dryRun no escribe: la previsualización es el mismo camino",
   },
 
+  // ── cotizaciones ─────────────────────────────────────────────────────────
+  {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/rates",
+    auth: "verified",
+    minRole: "VIEWER",
+    note: "Devuelve además qué pares FALTAN para que el inicio pueda convertir",
+  },
+  {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/rates",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "ExchangeRate no tiene spaceId: lo que se carga acá lo ven todos los Spaces",
+  },
+  {
+    method: "DELETE",
+    path: "/api/v1/spaces/[spaceId]/rates/[rateId]",
+    auth: "verified",
+    minRole: "MEMBER",
+  },
+
   // ── reparto de gastos ────────────────────────────────────────────────────
   {
     method: "GET",

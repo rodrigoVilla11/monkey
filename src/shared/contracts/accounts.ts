@@ -45,6 +45,12 @@ const baseAccountSchema = z.object({
   initialBalanceMinor: signedAmountMinorSchema.optional(),
   creditClosingDay: dayOfMonth.nullable().optional(),
   creditDueDay: dayOfMonth.nullable().optional(),
+  /**
+   * Si la cuenta cuenta para el inicio: aparece en la lista del dashboard Y
+   * suma al patrimonio neto. Sus movimientos siguen contando en reportes y
+   * presupuestos — esto decide qué es "lo mío de todos los días".
+   */
+  includeInNetWorth: z.boolean().optional(),
 });
 
 /**
@@ -117,6 +123,7 @@ export interface AccountDTO {
   readonly icon: string | null;
   readonly sortOrder: number;
   readonly isArchived: boolean;
+  readonly includeInNetWorth: boolean;
   readonly creditClosingDay: number | null;
   readonly creditDueDay: number | null;
   readonly createdAt: string;
@@ -126,4 +133,13 @@ export interface AccountDTO {
 export interface AccountWithBalance extends AccountDTO {
   readonly balance: MoneyDTO;
   readonly transactionCount: number;
+  /**
+   * El saldo convertido a la moneda primaria del Space, al tipo de cambio de
+   * HOY. `null` si la cuenta ya está en la primaria o si no hay cotización.
+   *
+   * Convertir al tipo de hoy es legítimo acá y no lo es en los reportes: un
+   * saldo es una posición ACTUAL, mientras que el gasto de enero es un hecho
+   * pasado que quedó congelado a su cotización. Son preguntas distintas.
+   */
+  readonly balancePrimary: MoneyDTO | null;
 }
