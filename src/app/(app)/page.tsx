@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import {
   ChevronRight,
   PiggyBank,
+  Target,
   TrendingDown,
   TrendingUp,
   TriangleAlert,
@@ -16,6 +17,7 @@ import { formatMoneyDTO } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { cn } from "@/lib/utils";
+import { formatCalendarDate } from "@/shared/dates";
 
 /**
  * Recharts pesa más de 100 kB y solo hace falta en esta pantalla.
@@ -56,6 +58,7 @@ export default function DashboardPage() {
     accounts,
     topExpenseCategories,
     byMember,
+    goalReminders,
   } = dashboard.data;
 
   const delta =
@@ -138,6 +141,57 @@ export default function DashboardPage() {
           </p>
         </div>
       </Card>
+
+      {/**
+       * Metas con plan. Es un recordatorio, no un informe: dice lo que toca
+       * hacer —"apartá 156,25 el domingo"— y nada más. El progreso está en su
+       * pantalla. Solo aparece si hay alguna con una forma elegida; sin eso no
+       * hay nada que recordar.
+       */}
+      {goalReminders.length > 0 && (
+        <Link href="/goals" className="block active:opacity-70">
+          <Card className="gap-2 p-4">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-sm font-semibold">
+                <Target className="size-4" />
+                Para tus metas
+              </span>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </div>
+
+            {goalReminders.map((goal) => (
+              <div key={goal.id} className="flex items-baseline gap-2">
+                <span
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: goal.color ?? "var(--primary)" }}
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate text-xs">
+                  {goal.name}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 text-xs tabular-nums",
+                    BigInt(goal.behind.amountMinor) > 0n
+                      ? "text-expense"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {BigInt(goal.behind.amountMinor) > 0n
+                    ? `te falta apartar ${formatMoneyDTO(goal.behind, locale)}`
+                    : goal.nextDate !== null
+                      ? `${formatMoneyDTO(goal.amount, locale)} el ${formatCalendarDate(
+                          goal.nextDate,
+                          locale,
+                          { day: "numeric", month: "short" },
+                        )}`
+                      : formatMoneyDTO(goal.amount, locale)}
+                </span>
+              </div>
+            ))}
+          </Card>
+        </Link>
+      )}
 
       {/* Presupuestos: solo aparece si hay alguno. Una tarjeta vacía
           prometiendo una función es ruido. */}

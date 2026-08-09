@@ -328,9 +328,17 @@ const validateReferences = async (
   if (categoryId != null) {
     const category = await db.category.findFirst({
       where: { id: categoryId },
-      select: { id: true, kind: true },
+      select: { id: true, kind: true, isArchived: true },
     });
     if (category === null) throw errors.notFound("No se encontró la categoría");
+
+    // Archivada es "ya no la uso": lo viejo se conserva, lo nuevo no entra.
+    if (category.isArchived) {
+      throw errors.conflict(
+        "CONFLICT",
+        "Esa categoría está archivada: sacala del archivo o elegí otra",
+      );
+    }
 
     // Un gasto en una categoría de ingresos rompería todos los reportes.
     if (category.kind !== type) {

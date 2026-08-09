@@ -230,12 +230,34 @@ function RuleCard({
             </span>
           </>
         )}
-        {rule.occurrencesCreated > 0 && (
-          <span className="text-muted-foreground">
-            {" "}
-            · {rule.occurrencesCreated} generados
-          </span>
-        )}
+        {/**
+         * Con tope, lo que importa es cuánto falta —"quedan 2 de 12"— y no
+         * cuántos se generaron: nadie programa una cuota para saber cuántas
+         * pagó, sino cuántas le quedan. Sin tope se sigue contando lo generado,
+         * que es lo único que hay para decir.
+         */}
+        {rule.maxOccurrences === null
+          ? rule.occurrencesCreated > 0 && (
+              <span className="text-muted-foreground">
+                {" "}
+                · {rule.occurrencesCreated} generados
+              </span>
+            )
+          : (() => {
+              const left = Math.max(
+                0,
+                rule.maxOccurrences - rule.occurrencesCreated,
+              );
+
+              return (
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {left === 0
+                    ? `terminado, ${String(rule.maxOccurrences)} generados`
+                    : `quedan ${String(left)} de ${String(rule.maxOccurrences)}`}
+                </span>
+              );
+            })()}
       </p>
 
       {canEdit && (
@@ -293,12 +315,19 @@ function NewRuleSheet({
     useState<(typeof RECURRENCE_FREQUENCIES)[number]>("MONTHLY");
   const [startDate, setStartDate] = useState("");
   const [autoPost, setAutoPost] = useState(true);
+  const [times, setTimes] = useState<string | null>(null);
 
   const accounts = useAccounts(spaceId);
   const categories = useCategories(spaceId, type);
 
   const active = accounts.data?.filter((a) => !a.isArchived) ?? [];
-  const account = active.find((a) => a.id === accountId) ?? active[0] ?? null;
+  // Sin elección explícita manda la principal, igual que al cargar un
+  // movimiento suelto.
+  const account =
+    active.find((a) => a.id === accountId) ??
+    active.find((a) => a.isDefault) ??
+    active[0] ??
+    null;
   const currency = account?.currency ?? "EUR";
   const exponent = getCurrencyExponent(currency);
   const effectiveStart = startDate === "" ? todayIn(timezone) : startDate;
@@ -318,6 +347,10 @@ function NewRuleSheet({
         ...(description.trim() !== ""
           ? { description: description.trim() }
           : {}),
+        // `null` = indefinido, que es lo que la columna ya significaba.
+        ...(times !== null && times !== ""
+          ? { maxOccurrences: Number(times) }
+          : {}),
         // El día del mes sale de la fecha de inicio: pedirlo aparte sería
         // pedir dos veces lo mismo y dejar que se contradigan.
         ...(frequency === "MONTHLY" || frequency === "YEARLY"
@@ -329,6 +362,7 @@ function NewRuleSheet({
       setAmount("");
       setDescription("");
       setCategoryId(null);
+      setTimes(null);
       onOpenChange(false);
       await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
     },
@@ -343,6 +377,9 @@ function NewRuleSheet({
     account !== null &&
     /^\d+([.,]\d+)?$/.test(amount) &&
     Number(amount.replace(",", ".")) > 0 &&
+    // Con "un número de veces" elegido pero vacío no se guarda: sería un
+    // límite que nadie puso.
+    (times === null || (times !== "" && Number(times) > 0)) &&
     !create.isPending;
 
   return (
@@ -441,6 +478,66 @@ function NewRuleSheet({
               Si ponés una fecha pasada, se generan también las que ya
               vencieron, cada una con su fecha.
             </p>
+          </div>
+
+          {/**
+           * El sueldo y el alquiler no se terminan; las cuotas de la tarjeta
+           * sí. Sin esta pregunta las dos cosas se anotaban igual y había que
+           * acordarse de ir a borrar la regla el día que dejara de aplicar.
+           */}
+          <div className="space-y-2">
+            <Label>¿Hasta cuándo?</Label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: "Indefinido", value: null },
+                { label: "Un número de veces", value: "" },
+              ].map((option) => {
+                const active = (times === null) === (option.value === null);
+
+                return (
+                  <button
+                    key={option.label}
+                    type="button"
+                    onClick={() => {
+                      setTimes(option.value);
+                    }}
+                    aria-pressed={active}
+                    className={cn(
+                      "min-h-touch rounded-full border px-3 text-sm",
+                      active &&
+                        "border-primary bg-primary text-primary-foreground",
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {times === null ? (
+              <p className="text-xs text-muted-foreground">
+                Se repite hasta que lo pauses. Es lo que querés para un sueldo o
+                un alquiler.
+              </p>
+            ) : (
+              <>
+                <Input
+                  value={times}
+                  onChange={(e) => {
+                    setTimes(e.target.value.replace(/\D/g, ""));
+                  }}
+                  placeholder="3"
+                  inputMode="numeric"
+                  aria-label="Cuántas veces"
+                  className="min-h-touch"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Las que FALTAN, no las del acuerdo: si de las doce de la
+                  tarjeta ya pagaste nueve, poné 3. Cuando se generen todas, la
+                  regla se termina sola.
+                </p>
+              </>
+            )}
           </div>
 
           <div className="space-y-2">

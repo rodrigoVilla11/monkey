@@ -176,21 +176,21 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  activeSpace         Space?                @relation("UserActiveSpace", fields: [activeSpaceId], references: [id], onDelete: SetNull)
-  memberships         Membership[]          @relation("MembershipUser")
-  invitedMemberships  Membership[]          @relation("MembershipInviter")
+  activeSpace         Space?              @relation("UserActiveSpace", fields: [activeSpaceId], references: [id], onDelete: SetNull)
+  memberships         Membership[]        @relation("MembershipUser")
+  invitedMemberships  Membership[]        @relation("MembershipInviter")
   refreshTokens       RefreshToken[]
   verificationTokens  VerificationToken[]
-  sentInvitations     Invitation[]          @relation("InvitationInviter")
-  acceptedInvitations Invitation[]          @relation("InvitationAcceptor")
+  sentInvitations     Invitation[]        @relation("InvitationInviter")
+  acceptedInvitations Invitation[]        @relation("InvitationAcceptor")
   auditLogs           AuditLog[]
   transactions        Transaction[]
-  paidTransactions    Transaction[]         @relation("TransactionPayer")
+  paidTransactions    Transaction[]       @relation("TransactionPayer")
   recurringRules      RecurringRule[]
   attachments         Attachment[]
   splits              TransactionSplit[]
-  settlementsSent     Settlement[]          @relation("SettlementFrom")
-  settlementsReceived Settlement[]          @relation("SettlementTo")
+  settlementsSent     Settlement[]        @relation("SettlementFrom")
+  settlementsReceived Settlement[]        @relation("SettlementTo")
 
   @@index([deletedAt])
 }
@@ -198,10 +198,10 @@ model User {
 model Space {
   id String @id @default(cuid(2))
 
-  name String
+  name            String
   /// Moneda de consolidación de reportes. Cada transacción guarda además su
   /// propia moneda y, si difiere, el tipo de cambio congelado.
-  primaryCurrency String @db.Char(3)
+  primaryCurrency String  @db.Char(3)
   timezone        String
   icon            String?
   color           String?
@@ -267,8 +267,8 @@ model Invitation {
   role    MembershipRole
 
   /// sha256 del token. El token en claro solo existe en el mail que se manda.
-  tokenHash String    @unique
-  expiresAt DateTime
+  tokenHash  String    @unique
+  expiresAt  DateTime
   acceptedAt DateTime?
   revokedAt  DateTime?
 
@@ -281,11 +281,11 @@ model Invitation {
   space      Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   invitedBy  User? @relation("InvitationInviter", fields: [invitedByUserId], references: [id], onDelete: SetNull)
   acceptedBy User? @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  /// "una sola invitación pendiente por (spaceId, email)" es un unique PARCIAL:
+  /// Prisma no lo expresa, va a mano en la migración inicial.
 
   @@index([spaceId, email])
   @@index([email, acceptedAt])
-  /// "una sola invitación pendiente por (spaceId, email)" es un unique PARCIAL:
-  /// Prisma no lo expresa, va a mano en la migración inicial.
 }
 
 model RefreshToken {
@@ -299,8 +299,8 @@ model RefreshToken {
   /// Hasheada: sirve para detectar anomalías sin guardar la IP en claro.
   ipHash      String?
 
-  expiresAt DateTime
-  revokedAt DateTime?
+  expiresAt         DateTime
+  revokedAt         DateTime?
   /// Rotación: apunta al token que reemplazó a este. Si alguien presenta un
   /// token ya rotado, es reuso → se revoca toda la familia.
   replacedByTokenId String?
@@ -386,6 +386,17 @@ model Account {
   /// qué es "lo mío de todos los días", no qué existe.
   includeInNetWorth Boolean @default(true)
 
+  /// La cuenta que viene elegida al cargar un movimiento.
+  ///
+  /// Una sola por Space, garantizado por un índice único parcial: dos cuentas
+  /// principales no son un estado raro que la pantalla pueda dibujar, son un
+  /// empate que alguien tendría que desempatar en cada pantalla.
+  ///
+  /// Es del Space y no de cada persona a propósito: las cuentas son
+  /// compartidas, y en un Space de dos ya hay un acuerdo sobre de dónde sale
+  /// la plata del día a día.
+  isDefault Boolean @default(false)
+
   /// Solo para CREDIT_CARD. Rango 1..31 forzado por CHECK en la migración.
   creditClosingDay Int?
   creditDueDay     Int?
@@ -421,6 +432,12 @@ model Category {
   sortOrder Int          @default(0)
   /// Viene del catálogo por defecto que se siembra al crear el Space.
   isSystem  Boolean      @default(false)
+  /// Archivada: no se ofrece al cargar, pero el historial queda intacto.
+  ///
+  /// Es lo que distingue "ya no uso esta categoría" de "esta categoría fue un
+  /// error": borrarla reasigna o deja sin categoría los movimientos que la
+  /// usaban, y eso reescribe el pasado. Archivar no toca ni una fila.
+  isArchived Boolean @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -439,9 +456,9 @@ model Category {
 }
 
 model Transaction {
-  id        String  @id @default(cuid(2))
-  spaceId   String
-  accountId String
+  id         String  @id @default(cuid(2))
+  spaceId    String
+  accountId  String
   categoryId String?
 
   /// SetNull al borrar el usuario para no dejar transacciones huérfanas;
@@ -590,10 +607,10 @@ model Tag {
 
   space        Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   transactions TransactionTag[]
+  /// (spaceId, name) único entre los no borrados: unique parcial en la migración.
 
   @@unique([spaceId, id])
   @@index([spaceId, deletedAt])
-  /// (spaceId, name) único entre los no borrados: unique parcial en la migración.
 }
 
 model TransactionTag {
@@ -614,8 +631,8 @@ model TransactionTag {
 }
 
 model Budget {
-  id      String  @id @default(cuid(2))
-  spaceId String
+  id         String  @id @default(cuid(2))
+  spaceId    String
   /// Null = presupuesto global del Space.
   categoryId String?
 
@@ -643,9 +660,9 @@ model Budget {
 }
 
 model RecurringRule {
-  id        String  @id @default(cuid(2))
-  spaceId   String
-  accountId String
+  id         String  @id @default(cuid(2))
+  spaceId    String
+  accountId  String
   categoryId String?
 
   createdByUserId String?
@@ -682,10 +699,10 @@ model RecurringRule {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  space     Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  account   Account       @relation(fields: [spaceId, accountId], references: [spaceId, id], onDelete: Restrict)
-  category  Category?     @relation(fields: [spaceId, categoryId], references: [spaceId, id], onDelete: Restrict)
-  createdBy User?         @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  space     Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [spaceId, accountId], references: [spaceId, id], onDelete: Restrict)
+  category  Category? @relation(fields: [spaceId, categoryId], references: [spaceId, id], onDelete: Restrict)
+  createdBy User?     @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   transactions Transaction[]
 
@@ -708,6 +725,16 @@ model SavingsGoal {
   color             String?
   achievedAt        DateTime?
 
+  /// La forma elegida para llegar: apartar tanto, cada tanto, desde tal día.
+  ///
+  /// Los cuatro campos van juntos o ninguno, garantizado por un CHECK, igual
+  /// que el plan de una deuda. No lleva tope de aportes: una meta se termina
+  /// cuando se junta la plata, no cuando se cumple un número pactado.
+  planAmountMinor BigInt?
+  planFrequency   RecurrenceFrequency?
+  planInterval    Int?
+  planStartDate   DateTime?            @db.Date
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -721,9 +748,9 @@ model SavingsGoal {
 }
 
 model SavingsContribution {
-  id      String @id @default(cuid(2))
-  spaceId String
-  goalId  String
+  id            String  @id @default(cuid(2))
+  spaceId       String
+  goalId        String
   /// Opcional: un aporte puede o no corresponder a una transacción real.
   transactionId String?
 
@@ -760,6 +787,22 @@ model Debt {
   installmentsTotal Int?
   closedAt          DateTime?
 
+  /// Plan de pago/cobro pactado: cuánto y cada cuánto. Es el ACUERDO tal como
+  /// se pactó, no una cuota calculada — el módulo sigue sin amortizar nada.
+  ///
+  /// Los cuatro campos van juntos o ninguno, y lo garantiza un CHECK: un
+  /// importe sin frecuencia no dice cuándo, y una frecuencia sin importe no
+  /// dice cuánto. Se reusa `RecurrenceFrequency` con su `interval` en vez de
+  /// un enum propio, así "quincenal" es WEEKLY cada 2 y el motor de
+  /// recurrencia —que ya sabe que el 31 vuelve a ser 31 después de febrero—
+  /// se usa igual acá que en los movimientos programados.
+  ///
+  /// `installmentsTotal` lo topea: 12 cuotas son 12 fechas, no infinitas.
+  planAmountMinor BigInt?
+  planFrequency   RecurrenceFrequency?
+  planInterval    Int?
+  planStartDate   DateTime?            @db.Date
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -774,9 +817,9 @@ model Debt {
 }
 
 model DebtPayment {
-  id      String @id @default(cuid(2))
-  spaceId String
-  debtId  String
+  id            String  @id @default(cuid(2))
+  spaceId       String
+  debtId        String
   transactionId String?
 
   amountMinor   BigInt

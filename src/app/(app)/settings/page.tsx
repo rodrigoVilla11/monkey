@@ -10,6 +10,7 @@ import {
   Moon,
   PiggyBank,
   Scale,
+  Shapes,
   ShieldCheck,
   Sun,
   Target,
@@ -79,6 +80,11 @@ export default function SettingsPage() {
               href="/recurring"
               icon={<CalendarClock className="size-4" />}
               label="Movimientos programados"
+            />
+            <Row
+              href="/settings/categories"
+              icon={<Shapes className="size-4" />}
+              label="Categorías"
             />
             <Row
               href="/budgets"

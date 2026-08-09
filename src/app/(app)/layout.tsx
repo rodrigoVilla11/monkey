@@ -18,6 +18,13 @@ import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
  *
  * El padding inferior del contenido deja lugar a la barra: sin eso, el último
  * movimiento de la lista queda tapado.
+ *
+ * `h-dvh` y no `min-h-dvh`: con un alto mínimo el shell crece con el
+ * contenido, `main` mide lo que mide la lista entera y entonces no tiene nada
+ * que scrollear. Ahí `overscroll-behavior: contain` —que está para que el
+ * bounce no se propague— se convierte en la trampa: `main` se come la rueda y
+ * el dedo, no los deja llegar al documento, y la app queda clavada. El alto
+ * tiene que ser definido para que el scroll viva adentro de `main`.
  */
 export default function AppLayout({ children }: { children: ReactNode }) {
   const session = useSession();
@@ -36,7 +43,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className="flex h-dvh flex-col">
       <header className="fixed inset-x-0 top-0 z-40 border-b bg-background/85 pt-safe-top backdrop-blur-lg">
         <div className="mx-auto flex h-[var(--spacing-header)] max-w-lg items-center px-4">
           {space !== undefined && spaces !== undefined && (

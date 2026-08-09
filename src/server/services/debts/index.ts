@@ -1,6 +1,7 @@
 import { errors } from "@/server/api/errors";
 import type { ScopedDb } from "@/server/db/scoped";
 import { accountBalances } from "@/server/services/balances";
+import { getRateProvider } from "@/server/services/rates";
 import type { TransactionClient } from "@/server/services/audit/log";
 import type { MoneyDTO } from "@/shared/contracts/common";
 import type {
@@ -22,11 +23,20 @@ import {
 import {
   debtBalance,
   debtForecast,
+  debtPlanProgress,
   installmentProgress,
   monthlyInterestCost,
   netPosition,
   type DebtDirection,
+  type DebtPlan,
 } from "@/shared/debt";
+// `money` acá construye el DTO de la respuesta; el de `shared/money` es el
+// valor con el que calcula `convert`. Se renombra para que no se confundan.
+import { convert, money as toMoney } from "@/shared/money";
+import {
+  describeRecurrence,
+  type RecurrenceFrequency,
+} from "@/shared/recurrence";
 
 /**
  * Deudas y préstamos.
@@ -63,6 +73,10 @@ const DEBT_SELECT = {
   installmentsTotal: true,
   closedAt: true,
   createdAt: true,
+  planAmountMinor: true,
+  planFrequency: true,
+  planInterval: true,
+  planStartDate: true,
   account: { select: { id: true, name: true, currency: true } },
 } as const;
 
@@ -79,8 +93,39 @@ interface DebtRow {
   installmentsTotal: number | null;
   closedAt: Date | null;
   createdAt: Date;
+  planAmountMinor: bigint | null;
+  planFrequency: string | null;
+  planInterval: number | null;
+  planStartDate: Date | null;
   account: { id: string; name: string; currency: string } | null;
 }
+
+/**
+ * El plan de la fila, o `null`.
+ *
+ * Los cuatro campos van juntos por un CHECK en la base, pero acá se vuelve a
+ * preguntar por los cuatro: el tipo de Prisma los da nullable por separado y
+ * confiar en el CHECK desde TypeScript sería confiar en algo que el compilador
+ * no ve.
+ */
+const planOf = (row: DebtRow): DebtPlan | null => {
+  if (
+    row.planAmountMinor === null ||
+    row.planFrequency === null ||
+    row.planInterval === null ||
+    row.planStartDate === null
+  ) {
+    return null;
+  }
+
+  return {
+    amountMinor: row.planAmountMinor,
+    frequency: row.planFrequency as RecurrenceFrequency,
+    interval: row.planInterval,
+    startDate: toCalendarDate(row.planStartDate),
+    installmentsTotal: row.installmentsTotal,
+  };
+};
 
 interface Rollup {
   readonly paidMinor: bigint;
@@ -99,12 +144,24 @@ const toDTO = (row: DebtRow, rollup: Rollup, today: CalendarDate): DebtDTO => {
   const balance = debtBalance(row.originalAmountMinor, rollup.paidMinor);
   const dueDate = row.dueDate === null ? null : toCalendarDate(row.dueDate);
 
+  const plan = planOf(row);
+  const progress =
+    plan === null
+      ? null
+      : debtPlanProgress({
+          plan,
+          originalMinor: row.originalAmountMinor,
+          paidMinor: balance.paidMinor,
+          today,
+        });
+
   const forecast = debtForecast({
     remainingMinor: balance.remainingMinor,
     paidMinor: balance.paidMinor,
     dueDate,
     firstPaymentDate: rollup.firstDate,
     today,
+    plan: progress,
   });
 
   const interest = monthlyInterestCost(
@@ -131,6 +188,30 @@ const toDTO = (row: DebtRow, rollup: Rollup, today: CalendarDate): DebtDTO => {
     dueDate,
     installments: installmentProgress(rollup.count, row.installmentsTotal),
     paymentCount: rollup.count,
+    plan:
+      plan === null || progress === null
+        ? null
+        : {
+            amount: money(plan.amountMinor, row.currency),
+            frequency: plan.frequency,
+            interval: plan.interval,
+            startDate: plan.startDate,
+            // La frase la arma el módulo de recurrencia: la misma que describe
+            // un movimiento programado, para que "cada 2 semanas" se diga
+            // igual en las dos pantallas.
+            description: describeRecurrence({
+              frequency: plan.frequency,
+              interval: plan.interval,
+              startDate: plan.startDate,
+            }),
+            nextDate: progress.nextDate,
+            expectedToDate: money(progress.expectedToDateMinor, row.currency),
+            behind: money(progress.behindMinor, row.currency),
+            dueCount: progress.dueCount,
+            remainingInstallments: progress.remainingInstallments,
+            payoffDate: progress.payoffDate,
+            coversDebt: progress.coversDebt,
+          },
     account: row.account,
     status: forecast.status,
     daysRemaining: forecast.daysRemaining,
@@ -277,6 +358,36 @@ const validateAccount = async (
   }
 };
 
+/**
+ * Las cuatro columnas del plan, siempre las cuatro.
+ *
+ * Se escriben juntas —o las cuatro con valor, o las cuatro en `null`— porque
+ * así lo exige el CHECK de la base. Escribirlas de a una desde el update
+ * dejaría medio plan y la fila sería rechazada, que es exactamente lo que el
+ * CHECK está para evitar.
+ */
+const planColumns = (
+  plan: CreateDebtRequest["plan"] | null,
+): {
+  planAmountMinor: bigint | null;
+  planFrequency: RecurrenceFrequency | null;
+  planInterval: number | null;
+  planStartDate: Date | null;
+} =>
+  plan == null
+    ? {
+        planAmountMinor: null,
+        planFrequency: null,
+        planInterval: null,
+        planStartDate: null,
+      }
+    : {
+        planAmountMinor: BigInt(plan.amountMinor),
+        planFrequency: plan.frequency,
+        planInterval: plan.interval,
+        planStartDate: fromCalendarDate(plan.startDate),
+      };
+
 export const createDebt = async (
   db: ScopedDb,
   tx: TransactionClient,
@@ -298,6 +409,7 @@ export const createDebt = async (
       startDate: fromCalendarDate(input.startDate),
       dueDate: input.dueDate == null ? null : fromCalendarDate(input.dueDate),
       installmentsTotal: input.installmentsTotal ?? null,
+      ...planColumns(input.plan ?? null),
     },
     select: { id: true },
   });
@@ -365,6 +477,9 @@ export const updateDebt = async (
       ...(input.installmentsTotal !== undefined
         ? { installmentsTotal: input.installmentsTotal }
         : {}),
+      // `undefined` deja el plan como está; `null` lo saca. Las cuatro
+      // columnas se mandan juntas o no se manda ninguna.
+      ...(input.plan !== undefined ? planColumns(input.plan) : {}),
     },
   });
 
@@ -593,18 +708,49 @@ const refreshClosed = async (
 
 // ───────────────────────────── posición neta ─────────────────────────────────
 
+/** Lo que aporta una moneda a la posición, antes de convertir. */
+interface Bucket {
+  accountsMinor: bigint;
+  receivableMinor: bigint;
+  payableMinor: bigint;
+  /** Cuántas cuentas y deudas hay acá. Para poder decir cuántas quedan afuera. */
+  positions: number;
+}
+
+const emptyBucket = (): Bucket => ({
+  accountsMinor: 0n,
+  receivableMinor: 0n,
+  payableMinor: 0n,
+  positions: 0,
+});
+
 /**
  * Caja + lo que te deben − lo que debés.
  *
- * Solo entran las deudas en la moneda primaria: sumar monedas distintas exige
- * una cotización, y este número no es lugar para inventar una. Las que quedan
- * afuera se cuentan en `excludedCount` para que la pantalla pueda decirlo en
- * vez de mostrar un total silenciosamente incompleto.
+ * ── Sobre las monedas ───────────────────────────────────────────────────────
+ *
+ * Lo que está en otra moneda se convierte con la ÚLTIMA cotización cargada, la
+ * misma que usa el patrimonio del inicio. Es una estimación de hoy, no un dato
+ * histórico congelado como el de una transacción: por eso se devuelve junto con
+ * la fecha de cada cotización usada, y la pantalla la muestra. Convertir sin
+ * decir con qué y de cuándo sería presentar una estimación como si fuera un
+ * hecho.
+ *
+ * Lo que NO se puede convertir —no hay cotización cargada para esa moneda—
+ * queda afuera del total y se dice cuál falta y cuántas posiciones dejó afuera.
+ * Inventar una cotización para no mostrar un hueco sería mucho peor que el
+ * hueco.
+ *
+ * Cada cifra se convierte por separado y no solo el neto: si no, "en cuentas" y
+ * "por cobrar" no sumarían el total que tienen debajo.
  */
 export const netPositionOf = async (
   db: ScopedDb,
   space: SpaceContext,
+  timezone: string,
 ): Promise<NetPositionDTO> => {
+  const today = todayIn(timezone);
+
   const [balances, debts] = await Promise.all([
     accountBalances(db),
     db.debt.findMany({
@@ -618,12 +764,20 @@ export const netPositionOf = async (
     }),
   ]);
 
-  let accountsMinor = 0n;
+  const buckets = new Map<string, Bucket>();
+  const bucketOf = (currency: string): Bucket => {
+    const existing = buckets.get(currency);
+    if (existing !== undefined) return existing;
+
+    const created = emptyBucket();
+    buckets.set(currency, created);
+    return created;
+  };
+
   for (const balance of balances.values()) {
-    // Igual que arriba: no se suman monedas distintas sin cotización.
-    if (balance.currency === space.primaryCurrency) {
-      accountsMinor += balance.balanceMinor;
-    }
+    const bucket = bucketOf(balance.currency);
+    bucket.accountsMinor += balance.balanceMinor;
+    bucket.positions += 1;
   }
 
   const rollups = await rollupsFor(
@@ -631,23 +785,52 @@ export const netPositionOf = async (
     debts.map((debt) => debt.id),
   );
 
-  let receivableMinor = 0n;
-  let payableMinor = 0n;
-  let excludedCount = 0;
-
   for (const debt of debts) {
-    if (debt.currency !== space.primaryCurrency) {
-      excludedCount += 1;
-      continue;
-    }
-
     const { remainingMinor } = debtBalance(
       debt.originalAmountMinor,
       rollups.get(debt.id)?.paidMinor ?? 0n,
     );
 
-    if (debt.direction === "OWED_TO_ME") receivableMinor += remainingMinor;
-    else payableMinor += remainingMinor;
+    const bucket = bucketOf(debt.currency);
+    bucket.positions += 1;
+    if (debt.direction === "OWED_TO_ME")
+      bucket.receivableMinor += remainingMinor;
+    else bucket.payableMinor += remainingMinor;
+  }
+
+  const provider = getRateProvider();
+
+  let accountsMinor = 0n;
+  let receivableMinor = 0n;
+  let payableMinor = 0n;
+  let excludedCount = 0;
+  const missingRates: string[] = [];
+  const conversions: { currency: string; rate: string; date: string }[] = [];
+
+  for (const [currency, bucket] of buckets) {
+    if (currency === space.primaryCurrency) {
+      accountsMinor += bucket.accountsMinor;
+      receivableMinor += bucket.receivableMinor;
+      payableMinor += bucket.payableMinor;
+      continue;
+    }
+
+    const lookup = await provider.find(currency, space.primaryCurrency, today);
+    const converted =
+      lookup === null
+        ? null
+        : convertBucket(bucket, currency, lookup.rate, space.primaryCurrency);
+
+    if (lookup === null || converted === null) {
+      missingRates.push(currency);
+      excludedCount += bucket.positions;
+      continue;
+    }
+
+    accountsMinor += converted.accountsMinor;
+    receivableMinor += converted.receivableMinor;
+    payableMinor += converted.payableMinor;
+    conversions.push({ currency, rate: lookup.rate, date: lookup.date });
   }
 
   const position = netPosition(accountsMinor, receivableMinor, payableMinor);
@@ -658,5 +841,51 @@ export const netPositionOf = async (
     payable: money(position.payableMinor, space.primaryCurrency),
     net: money(position.netMinor, space.primaryCurrency),
     excludedCount,
+    // Ordenadas para que dos llamadas seguidas digan lo mismo en el mismo orden.
+    missingRates: missingRates.sort((a, b) => a.localeCompare(b)),
+    conversions: conversions.sort((a, b) =>
+      a.currency.localeCompare(b.currency),
+    ),
+  };
+};
+
+/**
+ * Las tres cifras de una moneda, convertidas.
+ *
+ * `null` si la cotización no sirve —mal formada, moneda inválida—, que se trata
+ * igual que si faltara: no se convierte a medias.
+ */
+const convertBucket = (
+  bucket: Bucket,
+  currency: string,
+  rate: string,
+  primaryCurrency: string,
+): Bucket | null => {
+  const one = (amountMinor: bigint): bigint | null => {
+    const result = convert(
+      toMoney(amountMinor, currency),
+      rate,
+      primaryCurrency,
+    );
+    return result.ok ? result.value.amountMinor : null;
+  };
+
+  const accountsMinor = one(bucket.accountsMinor);
+  const receivableMinor = one(bucket.receivableMinor);
+  const payableMinor = one(bucket.payableMinor);
+
+  if (
+    accountsMinor === null ||
+    receivableMinor === null ||
+    payableMinor === null
+  ) {
+    return null;
+  }
+
+  return {
+    accountsMinor,
+    receivableMinor,
+    payableMinor,
+    positions: bucket.positions,
   };
 };

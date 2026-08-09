@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { goalForecast, goalProgress } from "@/shared/savings";
+import {
+  goalForecast,
+  goalPlanOptions,
+  goalPlanProgress,
+  goalProgress,
+} from "@/shared/savings";
 
 /**
  * Metas de ahorro: progreso y proyección.
@@ -176,5 +181,126 @@ describe("proyección", () => {
     expect(result.daysRemaining).toBe(0);
     // Lo que falta hace falta ya: no se reparte en cero meses.
     expect(result.requiredPerMonthMinor).toBe(90_000n);
+  });
+});
+
+describe("formas de llegar a la meta", () => {
+  /** La bici: faltan 2.500,00 y la fecha es el 27 de noviembre. */
+  const bici = {
+    remainingMinor: 250_000n,
+    targetDate: "2026-11-27",
+    today: "2026-08-09",
+  };
+
+  it("propone una por cada calendario y todas alcanzan", () => {
+    const options = goalPlanOptions(bici);
+
+    expect(options.map((o) => `${o.frequency}/${String(o.interval)}`)).toEqual([
+      "DAILY/1",
+      "WEEKLY/1",
+      "WEEKLY/2",
+      "MONTHLY/1",
+    ]);
+
+    // Ninguna se queda corta: es la condición de que sea un plan.
+    for (const option of options) {
+      expect(option.amountMinor * BigInt(option.count)).toBeGreaterThanOrEqual(
+        250_000n,
+      );
+      expect(option.lastDate <= bici.targetDate).toBe(true);
+    }
+  });
+
+  it("reparte en las semanas que hay, contando desde hoy", () => {
+    const weekly = goalPlanOptions(bici).find(
+      (o) => o.frequency === "WEEKLY" && o.interval === 1,
+    );
+
+    // Del 9 de agosto al 27 de noviembre hay 16 domingos contando el de hoy.
+    expect(weekly?.count).toBe(16);
+    expect(weekly?.amountMinor).toBe(15_625n);
+    expect(weekly?.lastDate).toBe("2026-11-22");
+  });
+
+  it("redondea para arriba: un plan que no llega no es un plan", () => {
+    // 2.500 en 3 aportes son 833,34 y no 833,33: con el redondeo hacia abajo
+    // faltaría un centavo el último día.
+    const options = goalPlanOptions({
+      remainingMinor: 250_000n,
+      targetDate: "2026-10-09",
+      today: "2026-08-09",
+    });
+
+    const monthly = options.find((o) => o.frequency === "MONTHLY");
+    expect(monthly?.count).toBe(3);
+    expect(monthly?.amountMinor).toBe(83_334n);
+  });
+
+  it("no repite la misma propuesta escrita distinto", () => {
+    // A cinco días, "una vez por semana" y "una vez por mes" son las dos un
+    // único aporte de todo.
+    const options = goalPlanOptions({
+      remainingMinor: 250_000n,
+      targetDate: "2026-08-14",
+      today: "2026-08-09",
+    });
+
+    expect(options.map((o) => o.count)).toEqual([6, 1]);
+  });
+
+  it("no propone nada sin fecha, ya alcanzada o con la fecha pasada", () => {
+    expect(goalPlanOptions({ ...bici, targetDate: null })).toHaveLength(0);
+    expect(goalPlanOptions({ ...bici, remainingMinor: 0n })).toHaveLength(0);
+    expect(goalPlanOptions({ ...bici, targetDate: "2026-08-08" })).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe("el plan elegido", () => {
+  const semanal = {
+    amountMinor: 15_625n,
+    frequency: "WEEKLY" as const,
+    interval: 1,
+    startDate: "2026-08-09",
+  };
+
+  it("dice cuántos aportes faltan y cuándo es el próximo", () => {
+    const result = goalPlanProgress({
+      plan: semanal,
+      targetMinor: 250_000n,
+      savedMinor: 31_250n,
+      today: "2026-08-16",
+    });
+
+    // Dos fechas vencidas (9 y 16), dos aportes hechos: al día.
+    expect(result.dueCount).toBe(2);
+    expect(result.behindMinor).toBe(0n);
+    expect(result.remainingContributions).toBe(14);
+    expect(result.nextDate).toBe("2026-08-23");
+  });
+
+  it("mide el atraso contra lo que ya venció, no contra el objetivo", () => {
+    const result = goalPlanProgress({
+      plan: semanal,
+      targetMinor: 250_000n,
+      savedMinor: 0n,
+      today: "2026-08-16",
+    });
+
+    // Se saltearon dos semanas: 312,50, no los 2.500 que faltan en total.
+    expect(result.behindMinor).toBe(31_250n);
+  });
+
+  it("una meta alcanzada no tiene próximo aporte", () => {
+    const result = goalPlanProgress({
+      plan: semanal,
+      targetMinor: 250_000n,
+      savedMinor: 250_000n,
+      today: "2026-08-16",
+    });
+
+    expect(result.nextDate).toBeNull();
+    expect(result.remainingContributions).toBe(0);
   });
 });

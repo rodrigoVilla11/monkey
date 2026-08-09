@@ -74,26 +74,42 @@ export function CategoryGrid({
 
   return (
     <div className="grid grid-cols-4 gap-2">
-      {categories.map((category) =>
-        category.children.length > 0 ? (
+      {categories.map((category) => {
+        if (category.children.length === 0) {
+          return (
+            <CategoryTile
+              key={category.id}
+              category={category}
+              selected={selectedId === category.id}
+              onSelect={onSelect}
+            />
+          );
+        }
+
+        /**
+         * Una madre se muestra elegida cuando lo está una de sus hijas, y con
+         * el nombre de la hija.
+         *
+         * Sin esto, elegir "Supermercado" y volver al primer nivel dejaba la
+         * pantalla sin ninguna marca: parecía que no había nada elegido. Con
+         * un tilde en la madre pero sin decir cuál, tampoco alcanza — la
+         * pregunta es "¿qué elegí?", no "¿elegí algo?".
+         */
+        const child = category.children.find((one) => one.id === selectedId);
+
+        return (
           <CategoryTile
             key={category.id}
             category={category}
-            selected={false}
+            selected={child !== undefined}
+            label={child?.name}
             hasChildren
             onSelect={() => {
               setExpandedId(category.id);
             }}
           />
-        ) : (
-          <CategoryTile
-            key={category.id}
-            category={category}
-            selected={selectedId === category.id}
-            onSelect={onSelect}
-          />
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }

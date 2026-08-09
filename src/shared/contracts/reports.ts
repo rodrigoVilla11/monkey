@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { BudgetSummary } from "./budgets";
+import type { GoalReminder } from "./savings";
 import { calendarDateSchema, type MoneyDTO } from "./common";
 
 /**
@@ -84,4 +85,9 @@ export interface DashboardResponse {
   readonly byMember: readonly MemberBreakdownItem[];
   /** Resumen de presupuestos. `total: 0` si todavía no hay ninguno. */
   readonly budgets: BudgetSummary;
+  /**
+   * Metas con una forma de llegar elegida, para recordarlas acá. Vacío si no
+   * hay ninguna: el inicio no muestra una sección que no tiene nada que decir.
+   */
+  readonly goalReminders: readonly GoalReminder[];
 }

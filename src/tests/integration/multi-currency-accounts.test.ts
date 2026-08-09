@@ -5,6 +5,7 @@ import { systemClient } from "@/server/db/system";
 import {
   createAccount,
   listAccounts,
+  setArchived,
   updateAccount,
 } from "@/server/services/accounts";
 import { createRate, listRates } from "@/server/services/rates/manage";
@@ -367,5 +368,66 @@ describe("cotizaciones", () => {
     // parece exacto y no lo es.
     expect(result.netWorth.converted).toBeNull();
     expect(result.netWorth.missingRates).toEqual(["USD"]);
+  });
+});
+
+describe("cuenta principal", () => {
+  it("la primera cuenta del Space queda principal sola", async () => {
+    const space = await makeSpace();
+    const primera = await addAccount(space, "Corriente", "EUR", "100000");
+
+    expect(primera.isDefault).toBe(true);
+
+    // La segunda no se la roba: la decisión ya estaba tomada.
+    const segunda = await addAccount(space, "Ahorro", "EUR", "50000");
+    expect(segunda.isDefault).toBe(false);
+  });
+
+  it("marcar otra se la saca a la anterior", async () => {
+    const space = await makeSpace();
+    const primera = await addAccount(space, "Corriente", "EUR", "100000");
+    const segunda = await addAccount(space, "Ahorro", "EUR", "50000");
+
+    await updateAccount(forSpace(space.spaceId), segunda.id, {
+      isDefault: true,
+    });
+
+    const cuentas = await listAccounts(forSpace(space.spaceId), {});
+    const principales = cuentas.filter((a) => a.isDefault);
+
+    // Una sola, siempre: dos serían un empate que cada pantalla desempataría
+    // por su cuenta.
+    expect(principales).toHaveLength(1);
+    expect(principales[0]?.id).toBe(segunda.id);
+    expect(cuentas.find((a) => a.id === primera.id)?.isDefault).toBe(false);
+  });
+
+  it("archivar la principal le saca la marca", async () => {
+    const space = await makeSpace();
+    const primera = await addAccount(space, "Corriente", "EUR", "100000");
+
+    await setArchived(forSpace(space.spaceId), primera.id, true);
+
+    const cuentas = await listAccounts(forSpace(space.spaceId), {
+      includeArchived: true,
+    });
+    // Si no, al desarchivarla meses después reaparecería como principal
+    // cuando ya hay otra.
+    expect(cuentas.find((a) => a.id === primera.id)?.isDefault).toBe(false);
+  });
+
+  it("la base no admite dos principales", async () => {
+    const space = await makeSpace();
+    const primera = await addAccount(space, "Corriente", "EUR", "100000");
+    const segunda = await addAccount(space, "Ahorro", "EUR", "50000");
+
+    // Sin pasar por el service, que es donde vive la cortesía de desmarcar la
+    // otra: acá manda el índice único parcial.
+    await expect(
+      testDb.$executeRaw`UPDATE "Account" SET "isDefault" = true WHERE "id" = ${segunda.id}`,
+    ).rejects.toThrow();
+
+    const cuentas = await listAccounts(forSpace(space.spaceId), {});
+    expect(cuentas.find((a) => a.id === primera.id)?.isDefault).toBe(true);
   });
 });

@@ -51,6 +51,12 @@ const baseAccountSchema = z.object({
    * presupuestos — esto decide qué es "lo mío de todos los días".
    */
   includeInNetWorth: z.boolean().optional(),
+  /**
+   * La que viene elegida al cargar un movimiento. Solo una por Space: marcar
+   * esta le saca la marca a la anterior, y hay un índice único parcial en la
+   * base que lo garantiza pase lo que pase.
+   */
+  isDefault: z.boolean().optional(),
 });
 
 /**
@@ -124,6 +130,8 @@ export interface AccountDTO {
   readonly sortOrder: number;
   readonly isArchived: boolean;
   readonly includeInNetWorth: boolean;
+  /** La que viene elegida al cargar un movimiento. Una sola por Space. */
+  readonly isDefault: boolean;
   readonly creditClosingDay: number | null;
   readonly creditDueDay: number | null;
   readonly createdAt: string;

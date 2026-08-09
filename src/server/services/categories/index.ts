@@ -6,6 +6,7 @@ import {
 } from "@/server/services/audit/log";
 import type {
   CategoryDTO,
+  CategoryFilters,
   CategoryTreeNode,
   CreateCategoryRequest,
   UpdateCategoryRequest,
@@ -28,6 +29,7 @@ const SELECT = {
   color: true,
   sortOrder: true,
   isSystem: true,
+  isArchived: true,
 } as const;
 
 const toDTO = (row: {
@@ -39,6 +41,7 @@ const toDTO = (row: {
   color: string | null;
   sortOrder: number;
   isSystem: boolean;
+  isArchived: boolean;
 }): CategoryDTO => ({
   id: row.id,
   name: row.name,
@@ -48,14 +51,26 @@ const toDTO = (row: {
   color: row.color,
   sortOrder: row.sortOrder,
   isSystem: row.isSystem,
+  isArchived: row.isArchived,
 });
 
 export const listCategories = async (
   db: ScopedDb,
-  kind?: "INCOME" | "EXPENSE",
+  filters: CategoryFilters = {},
 ): Promise<CategoryTreeNode[]> => {
+  const { kind, includeArchived = false } = filters;
+
   const rows = await db.category.findMany({
-    where: kind !== undefined ? { kind } : {},
+    /**
+     * Una madre archivada se lleva a sus hijas: la lista sale del mismo filtro
+     * para las dos, así que una hija activa de una madre archivada
+     * desaparecería del árbol (no tendría de dónde colgar). Se archivan juntas
+     * en `updateCategory`, que es lo que mantiene esto coherente.
+     */
+    where: {
+      ...(kind !== undefined ? { kind } : {}),
+      ...(includeArchived ? {} : { isArchived: false }),
+    },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     select: SELECT,
   });
@@ -187,9 +202,27 @@ export const updateCategory = async (
       ...(input.color !== undefined ? { color: input.color } : {}),
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+      ...(input.isArchived !== undefined
+        ? { isArchived: input.isArchived }
+        : {}),
     },
     select: SELECT,
   });
+
+  /**
+   * Archivar una madre archiva a sus hijas, y desarchivarla las devuelve.
+   *
+   * No es una comodidad: el árbol se arma filtrando la misma lista, así que una
+   * hija activa colgando de una madre archivada no tendría de dónde colgar y
+   * desaparecería de la pantalla sin que nadie lo haya pedido. La regla va en
+   * las dos direcciones para que sea una sola frase y no dos casos.
+   */
+  if (input.isArchived !== undefined) {
+    await db.category.updateMany({
+      where: { parentId: categoryId },
+      data: { isArchived: input.isArchived },
+    });
+  }
 
   return toDTO(row);
 };

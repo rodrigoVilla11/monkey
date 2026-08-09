@@ -205,9 +205,15 @@ const validateReferences = async (
   if (categoryId != null) {
     const category = await db.category.findFirst({
       where: { id: categoryId },
-      select: { kind: true },
+      select: { kind: true, isArchived: true },
     });
     if (category === null) throw errors.notFound("No se encontró la categoría");
+    if (category.isArchived) {
+      throw errors.conflict(
+        "CONFLICT",
+        "Esa categoría está archivada: sacala del archivo o elegí otra",
+      );
+    }
     if (category.kind !== type) {
       throw errors.conflict(
         "CONFLICT",

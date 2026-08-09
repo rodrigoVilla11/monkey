@@ -6,6 +6,7 @@ import type {
   ContributionDTO,
   CreateContributionRequest,
   CreateSavingsGoalRequest,
+  GoalReminder,
   SavingsGoalDetail,
   SavingsGoalDTO,
   SavingsGoalFilters,
@@ -18,7 +19,17 @@ import {
   todayIn,
   type CalendarDate,
 } from "@/shared/dates";
-import { goalForecast, goalProgress } from "@/shared/savings";
+import {
+  describeRecurrence,
+  type RecurrenceFrequency,
+} from "@/shared/recurrence";
+import {
+  goalForecast,
+  goalPlanOptions,
+  goalPlanProgress,
+  goalProgress,
+  type GoalPlan,
+} from "@/shared/savings";
 
 /**
  * Metas de ahorro.
@@ -55,6 +66,10 @@ const GOAL_SELECT = {
   targetDate: true,
   achievedAt: true,
   createdAt: true,
+  planAmountMinor: true,
+  planFrequency: true,
+  planInterval: true,
+  planStartDate: true,
   account: { select: { id: true, name: true, currency: true } },
 } as const;
 
@@ -68,8 +83,68 @@ interface GoalRow {
   targetDate: Date | null;
   achievedAt: Date | null;
   createdAt: Date;
+  planAmountMinor: bigint | null;
+  planFrequency: string | null;
+  planInterval: number | null;
+  planStartDate: Date | null;
   account: { id: string; name: string; currency: string } | null;
 }
+
+/**
+ * El plan de la fila, o `null`.
+ *
+ * Los cuatro campos van juntos por un CHECK en la base, pero acá se vuelve a
+ * preguntar por los cuatro: el tipo de Prisma los da nullable por separado y
+ * confiar en el CHECK desde TypeScript sería confiar en algo que el compilador
+ * no ve.
+ */
+const planOf = (row: GoalRow): GoalPlan | null => {
+  if (
+    row.planAmountMinor === null ||
+    row.planFrequency === null ||
+    row.planInterval === null ||
+    row.planStartDate === null
+  ) {
+    return null;
+  }
+
+  return {
+    amountMinor: row.planAmountMinor,
+    frequency: row.planFrequency as RecurrenceFrequency,
+    interval: row.planInterval,
+    startDate: toCalendarDate(row.planStartDate),
+  };
+};
+
+/**
+ * Las cuatro columnas del plan, siempre las cuatro.
+ *
+ * Se escriben juntas —o las cuatro con valor, o las cuatro en `null`— porque
+ * así lo exige el CHECK de la base. Escribirlas de a una desde el update
+ * dejaría medio plan y la fila sería rechazada, que es justo lo que el CHECK
+ * está para evitar.
+ */
+const planColumns = (
+  plan: CreateSavingsGoalRequest["plan"] | null,
+): {
+  planAmountMinor: bigint | null;
+  planFrequency: RecurrenceFrequency | null;
+  planInterval: number | null;
+  planStartDate: Date | null;
+} =>
+  plan == null
+    ? {
+        planAmountMinor: null,
+        planFrequency: null,
+        planInterval: null,
+        planStartDate: null,
+      }
+    : {
+        planAmountMinor: BigInt(plan.amountMinor),
+        planFrequency: plan.frequency,
+        planInterval: plan.interval,
+        planStartDate: fromCalendarDate(plan.startDate),
+      };
 
 /** Lo que hace falta saber de los aportes de una meta para armar su DTO. */
 interface Rollup {
@@ -100,6 +175,27 @@ const toDTO = (
     today,
   });
 
+  const plan = planOf(row);
+  const planned =
+    plan === null
+      ? null
+      : goalPlanProgress({
+          plan,
+          targetMinor: row.targetAmountMinor,
+          savedMinor: rollup.savedMinor,
+          today,
+        });
+
+  /**
+   * Las propuestas se calculan sobre lo que FALTA, no sobre el objetivo: quien
+   * ya juntó la mitad tiene que ver el número de la mitad que le queda.
+   */
+  const options = goalPlanOptions({
+    remainingMinor: progress.remainingMinor,
+    targetDate,
+    today,
+  });
+
   return {
     id: row.id,
     name: row.name,
@@ -126,6 +222,41 @@ const toDTO = (
         ? null
         : money(forecast.actualPerMonthMinor, row.currency),
     projectedDate: forecast.projectedDate,
+    planOptions: options.map((option) => ({
+      frequency: option.frequency,
+      interval: option.interval,
+      amount: money(option.amountMinor, row.currency),
+      count: option.count,
+      lastDate: option.lastDate,
+      // La frase la arma el motor de recurrencia: la misma que describe un
+      // movimiento programado, para que "cada 2 semanas" se diga igual en
+      // todas las pantallas.
+      description: describeRecurrence({
+        frequency: option.frequency,
+        interval: option.interval,
+        startDate: today,
+      }),
+    })),
+    plan:
+      plan === null || planned === null
+        ? null
+        : {
+            amount: money(plan.amountMinor, row.currency),
+            frequency: plan.frequency,
+            interval: plan.interval,
+            startDate: plan.startDate,
+            description: describeRecurrence({
+              frequency: plan.frequency,
+              interval: plan.interval,
+              startDate: plan.startDate,
+            }),
+            nextDate: planned.nextDate,
+            expectedToDate: money(planned.expectedToDateMinor, row.currency),
+            behind: money(planned.behindMinor, row.currency),
+            dueCount: planned.dueCount,
+            remainingContributions: planned.remainingContributions,
+            arrivalDate: planned.arrivalDate,
+          },
     createdAt: row.createdAt.toISOString(),
   };
 };
@@ -285,6 +416,7 @@ export const createSavingsGoal = async (
         input.targetDate == null ? null : fromCalendarDate(input.targetDate),
       icon: input.icon ?? null,
       color: input.color ?? null,
+      ...planColumns(input.plan ?? null),
     },
     select: { id: true },
   });
@@ -325,6 +457,9 @@ export const updateSavingsGoal = async (
         : {}),
       ...(input.icon !== undefined ? { icon: input.icon } : {}),
       ...(input.color !== undefined ? { color: input.color } : {}),
+      // `undefined` deja el plan como está; `null` lo saca. Las cuatro
+      // columnas se mandan juntas o no se manda ninguna.
+      ...(input.plan !== undefined ? planColumns(input.plan) : {}),
     },
   });
 
@@ -545,6 +680,48 @@ const refreshAchieved = async (
  * metas en monedas distintas no se suman sin una cotización, y esta tarjeta no
  * es lugar para inventar una.
  */
+/**
+ * Las metas con plan, para recordarlas en el inicio.
+ *
+ * Solo las que tienen una forma elegida: sin eso no hay nada que recordar, y
+ * llenar el inicio con todas las metas convertiría el recordatorio en ruido que
+ * se aprende a ignorar.
+ *
+ * Ordenadas por urgencia —primero lo que ya se debió apartar, después por
+ * fecha— porque el inicio se mira de arriba hacia abajo y ahí la primera línea
+ * es la única garantizada.
+ */
+export const goalReminders = async (
+  db: ScopedDb,
+  timezone: string,
+): Promise<GoalReminder[]> => {
+  const goals = await listSavingsGoals(db, timezone, {});
+
+  return goals
+    .filter((goal) => goal.plan !== null && !goal.achieved)
+    .map((goal) => ({
+      id: goal.id,
+      name: goal.name,
+      color: goal.color,
+      // El filtro de arriba lo garantiza; el compilador no lo ve.
+      amount: goal.plan?.amount ?? goal.target,
+      description: goal.plan?.description ?? "",
+      nextDate: goal.plan?.nextDate ?? null,
+      behind: goal.plan?.behind ?? money(0n, goal.target.currency),
+      remainingContributions: goal.plan?.remainingContributions ?? 0,
+    }))
+    .sort((a, b) => {
+      const aBehind = BigInt(a.behind.amountMinor) > 0n;
+      const bBehind = BigInt(b.behind.amountMinor) > 0n;
+      if (aBehind !== bBehind) return aBehind ? -1 : 1;
+
+      if (a.nextDate === b.nextDate) return a.name.localeCompare(b.name);
+      if (a.nextDate === null) return 1;
+      if (b.nextDate === null) return -1;
+      return a.nextDate.localeCompare(b.nextDate);
+    });
+};
+
 export const savingsSummary = async (
   db: ScopedDb,
   space: SpaceContext,

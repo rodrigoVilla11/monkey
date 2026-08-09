@@ -8,6 +8,7 @@ import {
   cuidSchema,
   type MoneyDTO,
 } from "./common";
+import { RECURRENCE_FREQUENCIES } from "./recurring";
 
 /**
  * Deudas y préstamos.
@@ -33,6 +34,25 @@ const positiveAmount = amountMinorSchema.refine(
   "El importe tiene que ser mayor que cero",
 );
 
+/**
+ * El plan de pago/cobro pactado: cuánto y cada cuánto.
+ *
+ * Llega como un objeto y no como cuatro campos sueltos porque los cuatro van
+ * juntos o ninguno —lo mismo que garantiza el CHECK de la base—, y así el
+ * "ninguno" se dice con un `null` en vez de tener que mandar cuatro.
+ *
+ * `interval` reusa la semántica del motor de recurrencia: quincenal es WEEKLY
+ * cada 2. No hay un enum propio de "cada cuánto" para que las fechas del plan y
+ * las de los movimientos programados no se calculen con dos reglas distintas.
+ */
+const planSchema = z.object({
+  amountMinor: positiveAmount,
+  frequency: z.enum(RECURRENCE_FREQUENCIES),
+  interval: z.number().int().min(1).max(365).default(1),
+  /** Desde cuándo corre el plan, que no tiene por qué ser el inicio de la deuda. */
+  startDate: calendarDateSchema,
+});
+
 const base = {
   direction: z.enum(DEBT_DIRECTIONS),
   /** Con quién es el acuerdo. Texto libre: no todo el mundo está en la app. */
@@ -53,7 +73,9 @@ const base = {
   accountId: cuidSchema.nullable().optional(),
   startDate: calendarDateSchema,
   dueDate: calendarDateSchema.nullable().optional(),
+  /** Cuotas pactadas. Topea el plan: 12 cuotas son 12 fechas, no infinitas. */
   installmentsTotal: z.number().int().min(1).max(600).nullable().optional(),
+  plan: planSchema.nullable().optional(),
 };
 
 export const createDebtRequestSchema = z
@@ -76,6 +98,8 @@ export const updateDebtRequestSchema = z
     startDate: calendarDateSchema.optional(),
     dueDate: calendarDateSchema.nullable().optional(),
     installmentsTotal: base.installmentsTotal,
+    /** `null` saca el plan; un objeto lo reemplaza entero, nunca a medias. */
+    plan: planSchema.nullable().optional(),
     /**
      * `direction` y `currency` no se editan: los pagos ya cargados están en esa
      * moneda, y dar vuelta el sentido convertiría una deuda en un préstamo
@@ -171,6 +195,33 @@ export interface DebtDTO {
   } | null;
   readonly paymentCount: number;
 
+  /**
+   * El plan pactado y cómo va contra los pagos reales.
+   *
+   * `behind` es lo que falta de lo que YA venció, no lo que falta en total: la
+   * diferencia entre "te atrasaste 300" y "todavía debés 3.000". Y `nextDate`
+   * es la próxima fecha del acuerdo, no un recordatorio: la app no cobra sola
+   * ni genera movimientos.
+   */
+  readonly plan: {
+    readonly amount: MoneyDTO;
+    readonly frequency: (typeof RECURRENCE_FREQUENCIES)[number];
+    readonly interval: number;
+    readonly startDate: string;
+    /** La regla en una línea, ya armada para la pantalla. */
+    readonly description: string;
+    readonly nextDate: string | null;
+    readonly expectedToDate: MoneyDTO;
+    readonly behind: MoneyDTO;
+    readonly dueCount: number;
+    /** Cuántas cuotas faltan al importe pactado. Sale del saldo, no de contar pagos. */
+    readonly remainingInstallments: number;
+    /** Cuándo quedaría saldada si el plan se cumple. */
+    readonly payoffDate: string | null;
+    /** `false` si las cuotas pactadas se quedan cortas para la deuda. */
+    readonly coversDebt: boolean;
+  } | null;
+
   readonly account: {
     readonly id: string;
     readonly name: string;
@@ -204,6 +255,24 @@ export interface NetPositionDTO {
   readonly receivable: MoneyDTO;
   readonly payable: MoneyDTO;
   readonly net: MoneyDTO;
-  /** Deudas en otra moneda que quedaron FUERA del total, para no mentir. */
+  /**
+   * Posiciones —cuentas o deudas— que quedaron FUERA del total porque falta la
+   * cotización de su moneda. Para no mostrar un total silenciosamente
+   * incompleto.
+   */
   readonly excludedCount: number;
+  /** Monedas sin cotización cargada. Son las que dejaron algo afuera. */
+  readonly missingRates: readonly string[];
+  /**
+   * Qué se convirtió y con la cotización de qué día.
+   *
+   * Va con fecha porque una cotización vieja no es un error pero tampoco es el
+   * dato de hoy: convertir con la del año pasado y no decirlo sería presentar
+   * una estimación como si fuera un hecho.
+   */
+  readonly conversions: readonly {
+    readonly currency: string;
+    readonly rate: string;
+    readonly date: string;
+  }[];
 }

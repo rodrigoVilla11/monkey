@@ -2,6 +2,7 @@ import type { ScopedDb } from "@/server/db/scoped";
 import { accountBalances } from "@/server/services/balances";
 import { budgetSummary } from "@/server/services/budgets";
 import { getRateProvider } from "@/server/services/rates";
+import { goalReminders } from "@/server/services/savings";
 import { groupSumInPrimary } from "./aggregate";
 import { percentageOf } from "@/shared/balance";
 import type { MoneyDTO } from "@/shared/contracts/common";
@@ -272,6 +273,7 @@ export const getDashboard = async (
     topCategories,
     members,
     budgets,
+    reminders,
   ] = await Promise.all([
     summarize(db, current, space.primaryCurrency),
     summarize(db, previous, space.primaryCurrency),
@@ -280,6 +282,7 @@ export const getDashboard = async (
     topExpenseCategories(db, current, space.primaryCurrency, 6),
     byMember(db, current, space.primaryCurrency),
     budgetSummary(db, viewerTimezone, space.primaryCurrency),
+    goalReminders(db, viewerTimezone),
   ]);
 
   return {
@@ -291,6 +294,7 @@ export const getDashboard = async (
     topExpenseCategories: topCategories,
     byMember: members,
     budgets,
+    goalReminders: reminders,
   };
 };
 

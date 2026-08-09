@@ -13,6 +13,7 @@ import {
   removePayment,
   updateDebt,
 } from "@/server/services/debts";
+import { createRate } from "@/server/services/rates/manage";
 import { monthlyReport } from "@/server/services/reports";
 
 import { disconnect, resetDatabase, testDb } from "./helpers/db";
@@ -81,6 +82,23 @@ const context = (space: Space) => ({
   spaceId: space.spaceId,
   primaryCurrency: space.primaryCurrency,
 });
+
+/**
+ * Fecha fija y pasada para las cotizaciones: el proveedor busca la última con
+ * fecha menor o igual a hoy, así que una del pasado sirve corra el día que
+ * corra. Una de mañana no se encontraría nunca.
+ */
+const RATE_DATE = "2026-01-02";
+
+const addRate = (base: string, quote: string, rate: string) =>
+  systemClient().$transaction(async (tx) =>
+    createRate(tx, TIMEZONE, {
+      baseCurrency: base,
+      quoteCurrency: quote,
+      rate,
+      date: RATE_DATE,
+    }),
+  );
 
 const addDebt = (
   space: Space,
@@ -155,6 +173,141 @@ describe("registra, no amortiza", () => {
 
     expect(debt.interestRateBps).toBeNull();
     expect(debt.monthlyInterestCost).toBeNull();
+  });
+});
+
+describe("plan de pago/cobro", () => {
+  /**
+   * Las fechas están elegidas para que el test no dependa de qué día se corra:
+   * un plan arrancado en 2020 ya venció entero, y uno de 2099 todavía no
+   * arrancó. En el medio, "cuántas cuotas vencieron" cambiaría cada mes.
+   */
+  const plan = {
+    amountMinor: "50000",
+    frequency: "MONTHLY" as const,
+    interval: 1,
+    startDate: "2020-01-05",
+  };
+
+  it("guarda el acuerdo y lo describe en una línea", async () => {
+    const space = await makeSpace();
+    const debtId = await addDebt(space, { plan });
+
+    const debt = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+
+    expect(debt.plan?.amount.amountMinor).toBe("50000");
+    expect(debt.plan?.frequency).toBe("MONTHLY");
+    expect(debt.plan?.description).toBe("Todos los meses el día 5");
+    expect(debt.plan?.coversDebt).toBe(true);
+  });
+
+  it("sin plan no inventa ninguno", async () => {
+    const space = await makeSpace();
+    const debtId = await addDebt(space);
+
+    const debt = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+    expect(debt.plan).toBeNull();
+  });
+
+  it("un plan ya vencido entero espera el total, no más", async () => {
+    const space = await makeSpace();
+    // 5.000 en cuotas de 500 desde 2020: las diez ya vencieron.
+    const debtId = await addDebt(space, { plan });
+
+    await pay(space, debtId, { amountMinor: "200000", date: "2026-03-01" });
+
+    const debt = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+
+    expect(debt.plan?.expectedToDate.amountMinor).toBe("500000");
+    expect(debt.plan?.behind.amountMinor).toBe("300000");
+    expect(debt.plan?.nextDate).toBeNull();
+  });
+
+  it("sin vencimiento, el plan es lo que permite decir que está atrasada", async () => {
+    const space = await makeSpace();
+    const debtId = await addDebt(space, { plan });
+
+    const debt = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+
+    expect(debt.dueDate).toBeNull();
+    expect(debt.status).toBe("BEHIND");
+  });
+
+  it("un plan que todavía no arrancó no atrasa nada", async () => {
+    const space = await makeSpace();
+    const debtId = await addDebt(space, {
+      plan: { ...plan, startDate: "2099-01-05" },
+    });
+
+    const debt = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+
+    expect(debt.plan?.dueCount).toBe(0);
+    expect(debt.plan?.behind.amountMinor).toBe("0");
+    expect(debt.plan?.nextDate).toBe("2099-01-05");
+    expect(debt.status).toBe("ON_TRACK");
+  });
+
+  it("avisa cuando las cuotas pactadas no cubren la deuda", async () => {
+    const space = await makeSpace();
+    // Tres de 500 contra 5.000: el acuerdo no cierra.
+    const debtId = await addDebt(space, {
+      plan: { ...plan, startDate: "2099-01-05" },
+      installmentsTotal: 3,
+    });
+
+    const debt = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+
+    expect(debt.plan?.coversDebt).toBe(false);
+    expect(debt.plan?.payoffDate).toBeNull();
+  });
+
+  it("se agrega y se saca de una deuda que ya existe", async () => {
+    const space = await makeSpace();
+    const debtId = await addDebt(space);
+
+    await systemClient().$transaction(async (tx) =>
+      updateDebt(forSpace(space.spaceId), tx, space.spaceId, debtId, { plan }),
+    );
+
+    const conPlan = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+    expect(conPlan.plan?.amount.amountMinor).toBe("50000");
+
+    await systemClient().$transaction(async (tx) =>
+      updateDebt(forSpace(space.spaceId), tx, space.spaceId, debtId, {
+        plan: null,
+      }),
+    );
+
+    const sinPlan = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+    expect(sinPlan.plan).toBeNull();
+    // Y sin plan vuelve a no poder estar atrasada.
+    expect(sinPlan.status).toBe("ON_TRACK");
+  });
+
+  it("editar otra cosa no borra el plan", async () => {
+    const space = await makeSpace();
+    const debtId = await addDebt(space, { plan });
+
+    await systemClient().$transaction(async (tx) =>
+      updateDebt(forSpace(space.spaceId), tx, space.spaceId, debtId, {
+        counterparty: "Mi cuñado",
+      }),
+    );
+
+    const debt = await getDebt(forSpace(space.spaceId), TIMEZONE, debtId);
+    expect(debt.counterparty).toBe("Mi cuñado");
+    expect(debt.plan?.amount.amountMinor).toBe("50000");
+  });
+
+  it("la base rechaza medio plan", async () => {
+    // El CHECK, no Zod: un import o un arreglo a mano por psql tampoco pueden
+    // dejar un importe sin frecuencia.
+    const space = await makeSpace();
+    const debtId = await addDebt(space);
+
+    await expect(
+      testDb.$executeRaw`UPDATE "Debt" SET "planAmountMinor" = 50000 WHERE "id" = ${debtId}`,
+    ).rejects.toThrow();
   });
 });
 
@@ -423,6 +576,7 @@ describe("posición neta", () => {
     const position = await netPositionOf(
       forSpace(space.spaceId),
       context(space),
+      TIMEZONE,
     );
 
     expect(position.accounts.amountMinor).toBe("1000000");
@@ -448,12 +602,20 @@ describe("posición neta", () => {
       },
     });
 
-    const before = await netPositionOf(forSpace(space.spaceId), context(space));
+    const before = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
 
     // Y se anota que se deben.
     await addDebt(space, { originalAmountMinor: "500000" });
 
-    const after = await netPositionOf(forSpace(space.spaceId), context(space));
+    const after = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
 
     // La caja no cambió entre las dos lecturas, pero el neto bajó justo lo que
     // se debe. Las dos cifras son ciertas y responden preguntas distintas.
@@ -472,6 +634,7 @@ describe("posición neta", () => {
     const position = await netPositionOf(
       forSpace(space.spaceId),
       context(space),
+      TIMEZONE,
     );
     expect(position.payable.amountMinor).toBe("300000");
   });
@@ -489,11 +652,147 @@ describe("posición neta", () => {
     const position = await netPositionOf(
       forSpace(space.spaceId),
       context(space),
+      TIMEZONE,
     );
 
-    // Sumar monedas distintas exige una cotización, y este total no es lugar
-    // para inventar una. Pero se avisa en vez de callar.
+    // Sin cotización cargada no se inventa un número: queda afuera, pero se
+    // dice cuál falta y cuánto dejó afuera.
     expect(position.payable.amountMinor).toBe("350000");
+    expect(position.excludedCount).toBe(1);
+    expect(position.missingRates).toEqual(["USD"]);
+    expect(position.conversions).toEqual([]);
+  });
+
+  it("con la cotización cargada, la deuda en otra moneda entra convertida", async () => {
+    const space = await makeSpace();
+    await addRate("USD", "EUR", "0.92");
+
+    // 1.000,00 USD a 0,92 = 920,00 €.
+    await addDebt(space, {
+      counterparty: "En dólares",
+      currency: "USD",
+      originalAmountMinor: "100000",
+    });
+
+    const position = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
+
+    expect(position.payable.amountMinor).toBe("92000");
+    expect(position.excludedCount).toBe(0);
+    expect(position.missingRates).toEqual([]);
+    // Y se dice con qué se convirtió: una cotización vieja convierte igual de
+    // bien y el número significa otra cosa.
+    expect(position.conversions).toHaveLength(1);
+    expect(position.conversions[0]?.currency).toBe("USD");
+    expect(position.conversions[0]?.date).toBe(RATE_DATE);
+  });
+
+  it("también convierte el saldo de las cuentas en otra moneda", async () => {
+    const space = await makeSpace();
+    await addRate("USD", "EUR", "0.92");
+
+    // 10.000,00 € en la cuenta de siempre + 1.000,00 USD en otra.
+    await forSpace(space.spaceId).account.create({
+      data: {
+        spaceId: space.spaceId,
+        name: "Ahorro USD",
+        type: "BANK",
+        currency: "USD",
+        initialBalanceMinor: 100_000n,
+      },
+    });
+
+    const position = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
+
+    expect(position.accounts.amountMinor).toBe("1092000");
+    expect(position.net.amountMinor).toBe("1092000");
+  });
+
+  it("cargar la cotización que falta mete la posición adentro", async () => {
+    const space = await makeSpace();
+    await addDebt(space, {
+      direction: "OWED_TO_ME",
+      counterparty: "Me deben en dólares",
+      currency: "USD",
+      originalAmountMinor: "100000",
+    });
+
+    const antes = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
+    expect(antes.receivable.amountMinor).toBe("0");
+    expect(antes.missingRates).toEqual(["USD"]);
+
+    await addRate("USD", "EUR", "0.92");
+
+    const despues = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
+    expect(despues.receivable.amountMinor).toBe("92000");
+    expect(despues.missingRates).toEqual([]);
+  });
+
+  it("convierte cada cifra por separado, no solo el neto", async () => {
+    const space = await makeSpace();
+    await addRate("USD", "EUR", "0.92");
+
+    await addDebt(space, {
+      currency: "USD",
+      originalAmountMinor: "100000",
+    });
+    await addDebt(space, {
+      direction: "OWED_TO_ME",
+      currency: "USD",
+      originalAmountMinor: "50000",
+    });
+
+    const position = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
+
+    // Si se convirtiera solo el neto, el desglose de arriba no sumaría el
+    // total que tiene debajo.
+    expect(position.payable.amountMinor).toBe("92000");
+    expect(position.receivable.amountMinor).toBe("46000");
+    expect(BigInt(position.net.amountMinor)).toBe(
+      BigInt(position.accounts.amountMinor) + 46_000n - 92_000n,
+    );
+  });
+
+  it("una moneda sin cotización no tira abajo a las que sí la tienen", async () => {
+    const space = await makeSpace();
+    await addRate("USD", "EUR", "0.92");
+
+    await addDebt(space, {
+      currency: "USD",
+      originalAmountMinor: "100000",
+    });
+    await addDebt(space, {
+      currency: "GBP",
+      originalAmountMinor: "100000",
+    });
+
+    const position = await netPositionOf(
+      forSpace(space.spaceId),
+      context(space),
+      TIMEZONE,
+    );
+
+    expect(position.payable.amountMinor).toBe("92000");
+    expect(position.missingRates).toEqual(["GBP"]);
     expect(position.excludedCount).toBe(1);
   });
 
@@ -506,6 +805,7 @@ describe("posición neta", () => {
     const position = await netPositionOf(
       forSpace(space.spaceId),
       context(space),
+      TIMEZONE,
     );
     expect(position.payable.amountMinor).toBe("0");
   });
@@ -648,7 +948,11 @@ describe("aislamiento entre Spaces", () => {
 
     await addDebt(other, { originalAmountMinor: "900000" });
 
-    const position = await netPositionOf(forSpace(mine.spaceId), context(mine));
+    const position = await netPositionOf(
+      forSpace(mine.spaceId),
+      context(mine),
+      TIMEZONE,
+    );
 
     expect(position.payable.amountMinor).toBe("0");
     expect(position.net.amountMinor).toBe("1000000");

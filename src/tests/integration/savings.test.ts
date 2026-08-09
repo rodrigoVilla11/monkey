@@ -7,6 +7,7 @@ import { monthlyReport } from "@/server/services/reports";
 import {
   addContribution,
   createSavingsGoal,
+  goalReminders,
   deleteSavingsGoal,
   getSavingsGoal,
   listSavingsGoals,
@@ -539,5 +540,215 @@ describe("aislamiento entre Spaces", () => {
 
     const goals = await listSavingsGoals(forSpace(mine.spaceId), TIMEZONE, {});
     expect(goals).toHaveLength(0);
+  });
+});
+
+describe("cómo llegar a la meta", () => {
+  /**
+   * Un plan arrancado en 2020 ya venció entero, corra el día que corra el
+   * test. Las propuestas, en cambio, dependen de cuánto falta para la fecha
+   * objetivo, así que de ellas se afirma lo que es cierto siempre: que
+   * alcanzan y que terminan a tiempo.
+   */
+  const plan = {
+    amountMinor: "50000",
+    frequency: "MONTHLY" as const,
+    interval: 1,
+    startDate: "2020-01-05",
+  };
+
+  it("propone formas de llegar y todas alcanzan a tiempo", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { targetDate: "2099-11-27" });
+
+    const goal = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+
+    expect(goal.planOptions.length).toBeGreaterThan(0);
+    for (const option of goal.planOptions) {
+      expect(
+        BigInt(option.amount.amountMinor) * BigInt(option.count),
+      ).toBeGreaterThanOrEqual(BigInt(goal.remaining.amountMinor));
+      expect(option.lastDate <= "2099-11-27").toBe(true);
+    }
+  });
+
+  it("las propuestas se calculan sobre lo que falta, no sobre el objetivo", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { targetDate: "2099-11-27" });
+
+    const antes = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    await contribute(space, goalId, { amountMinor: "150000" });
+    const despues = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+
+    const mensualAntes = antes.planOptions.find(
+      (o) => o.frequency === "MONTHLY",
+    );
+    const mensualDespues = despues.planOptions.find(
+      (o) => o.frequency === "MONTHLY",
+    );
+
+    // Con la mitad juntada, el número propuesto baja.
+    expect(BigInt(mensualDespues?.amount.amountMinor ?? "0")).toBeLessThan(
+      BigInt(mensualAntes?.amount.amountMinor ?? "0"),
+    );
+  });
+
+  it("sin fecha objetivo no propone nada", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space);
+
+    const goal = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    expect(goal.planOptions).toEqual([]);
+  });
+
+  it("guarda la forma elegida y dice cuántos aportes faltan", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { plan });
+
+    const goal = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+
+    expect(goal.plan?.amount.amountMinor).toBe("50000");
+    expect(goal.plan?.description).toBe("Todos los meses el día 5");
+    // 3.000 en aportes de 500: seis.
+    expect(goal.plan?.remainingContributions).toBe(6);
+  });
+
+  it("el atraso es contra lo que ya venció", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { plan });
+
+    await contribute(space, goalId, { amountMinor: "100000" });
+
+    const goal = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+
+    // Las seis fechas ya pasaron: se esperaba el objetivo entero y hay 1.000.
+    expect(goal.plan?.expectedToDate.amountMinor).toBe("300000");
+    expect(goal.plan?.behind.amountMinor).toBe("200000");
+    expect(goal.plan?.remainingContributions).toBe(4);
+  });
+
+  it("se cambia y se saca de una meta que ya existe", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space);
+
+    await systemClient().$transaction(async (tx) =>
+      updateSavingsGoal(forSpace(space.spaceId), tx, space.spaceId, goalId, {
+        plan,
+      }),
+    );
+    const conPlan = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    expect(conPlan.plan?.amount.amountMinor).toBe("50000");
+
+    await systemClient().$transaction(async (tx) =>
+      updateSavingsGoal(forSpace(space.spaceId), tx, space.spaceId, goalId, {
+        plan: null,
+      }),
+    );
+    const sinPlan = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    expect(sinPlan.plan).toBeNull();
+  });
+
+  it("editar otra cosa no borra el plan", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { plan });
+
+    await systemClient().$transaction(async (tx) =>
+      updateSavingsGoal(forSpace(space.spaceId), tx, space.spaceId, goalId, {
+        name: "La bici",
+      }),
+    );
+
+    const goal = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    expect(goal.name).toBe("La bici");
+    expect(goal.plan?.amount.amountMinor).toBe("50000");
+  });
+
+  it("la base rechaza medio plan", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space);
+
+    await expect(
+      testDb.$executeRaw`UPDATE "SavingsGoal" SET "planAmountMinor" = 50000 WHERE "id" = ${goalId}`,
+    ).rejects.toThrow();
+  });
+});
+
+describe("recordatorios del inicio", () => {
+  const plan = {
+    amountMinor: "50000",
+    frequency: "MONTHLY" as const,
+    interval: 1,
+    startDate: "2020-01-05",
+  };
+
+  it("solo trae las metas con una forma elegida", async () => {
+    const space = await makeSpace();
+    await addGoal(space, { name: "Sin plan" });
+    await addGoal(space, { name: "Con plan", plan });
+
+    const reminders = await goalReminders(forSpace(space.spaceId), TIMEZONE);
+
+    expect(reminders.map((r) => r.name)).toEqual(["Con plan"]);
+    expect(reminders[0]?.amount.amountMinor).toBe("50000");
+  });
+
+  it("pone primero lo que ya se debió apartar", async () => {
+    const space = await makeSpace();
+    // Al día: el plan arranca en el futuro, así que todavía no venció nada.
+    await addGoal(space, {
+      name: "Al día",
+      plan: { ...plan, startDate: "2099-01-05" },
+    });
+    await addGoal(space, { name: "Atrasada", plan });
+
+    const reminders = await goalReminders(forSpace(space.spaceId), TIMEZONE);
+
+    expect(reminders.map((r) => r.name)).toEqual(["Atrasada", "Al día"]);
+  });
+
+  it("una meta alcanzada no recuerda nada", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { name: "Lograda", plan });
+
+    await contribute(space, goalId, { amountMinor: "300000" });
+
+    const reminders = await goalReminders(forSpace(space.spaceId), TIMEZONE);
+    expect(reminders).toEqual([]);
   });
 });

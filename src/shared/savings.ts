@@ -1,5 +1,7 @@
 import { addDays, differenceInDays, type CalendarDate } from "./dates";
 import { divideRoundHalfUp } from "./money";
+import { planProgress, type InstallmentPlan } from "./plan";
+import { occurrencesUpTo, type RecurrenceFrequency } from "./recurrence";
 
 /**
  * Metas de ahorro: progreso y proyección. Lógica pura, sin base de datos.
@@ -212,4 +214,152 @@ const paceOf = (
   if (days < 7) return null;
 
   return divideRoundHalfUp(savedMinor * 3044n, BigInt(days) * 100n);
+};
+
+// ─────────────────────────── cómo llegar a la meta ───────────────────────────
+
+/**
+ * Una forma concreta de llegar: "16 aportes semanales de 156,25".
+ *
+ * No es un consejo financiero ni una predicción: es la misma división hecha
+ * con distintos calendarios, para que elegir sea mirar cuál entra en el
+ * bolsillo y no hacer la cuenta a mano. Por eso cada opción viene con cuántas
+ * veces y cuándo termina — un número por semana sin saber cuántas semanas no
+ * dice nada.
+ */
+export interface GoalPlanOption {
+  readonly frequency: RecurrenceFrequency;
+  /** Cada cuántos períodos. Quincenal = WEEKLY cada 2. */
+  readonly interval: number;
+  /** Cuánto por vez. Redondeado ARRIBA: ver abajo. */
+  readonly amountMinor: bigint;
+  readonly count: number;
+  /** Fecha del último aporte. Puede caer días antes del objetivo. */
+  readonly lastDate: CalendarDate;
+}
+
+const CADENCES = [
+  { frequency: "DAILY", interval: 1 },
+  { frequency: "WEEKLY", interval: 1 },
+  { frequency: "WEEKLY", interval: 2 },
+  { frequency: "MONTHLY", interval: 1 },
+] as const;
+
+/**
+ * Tope de fechas de una propuesta. Más allá no es una propuesta: es una lista.
+ * ~2,7 años de aportes diarios.
+ */
+const OPTION_LIMIT = 1000;
+
+/**
+ * Las formas de llegar a la meta antes de la fecha.
+ *
+ * Vacío si no hay fecha objetivo, si ya se alcanzó o si la fecha ya pasó: en
+ * los tres casos no hay nada que proponer, y proponer igual sería inventar un
+ * plazo que nadie puso.
+ *
+ * El importe se redondea PARA ARRIBA. Con 2.500 en 16 semanas, 156,25 exacto;
+ * con 2.500 en 3 meses, 833,34 y no 833,33 — la diferencia son dos centavos
+ * que, redondeando para abajo, dejarían la meta sin cumplir el último día. Un
+ * plan que no llega no es un plan.
+ */
+export const goalPlanOptions = (options: {
+  readonly remainingMinor: bigint;
+  readonly targetDate: CalendarDate | null;
+  readonly today: CalendarDate;
+}): readonly GoalPlanOption[] => {
+  const { remainingMinor, targetDate, today } = options;
+
+  if (remainingMinor <= 0n || targetDate === null || targetDate < today) {
+    return [];
+  }
+
+  const result: GoalPlanOption[] = [];
+
+  for (const cadence of CADENCES) {
+    const window = occurrencesUpTo(
+      { ...cadence, startDate: today },
+      today,
+      targetDate,
+      OPTION_LIMIT,
+    );
+
+    if (window.truncated) continue;
+
+    const count = window.dates.length;
+    const lastDate = window.dates[count - 1];
+    if (count === 0 || lastDate === undefined) continue;
+
+    /**
+     * Dos calendarios que dan el mismo número de aportes son la misma
+     * propuesta escrita distinto: si a la meta le quedan cinco días, "una vez
+     * por semana" y "una vez por mes" son las dos un único aporte de todo. Se
+     * queda la primera, que es la de grano más fino.
+     */
+    if (result.some((option) => option.count === count)) continue;
+
+    result.push({
+      ...cadence,
+      amountMinor: (remainingMinor + BigInt(count) - 1n) / BigInt(count),
+      count,
+      lastDate,
+    });
+  }
+
+  return result;
+};
+
+// ──────────────────────── el plan elegido, y cómo va ─────────────────────────
+
+/**
+ * El plan que la persona eligió: apartar tanto, cada tanto, desde tal día.
+ *
+ * No lleva tope de aportes —a diferencia del de una deuda— porque una meta se
+ * termina cuando se junta la plata, no cuando se cumple un número de cuotas
+ * pactado con nadie.
+ */
+export interface GoalPlan {
+  readonly amountMinor: bigint;
+  readonly frequency: RecurrenceFrequency;
+  readonly interval: number;
+  readonly startDate: CalendarDate;
+}
+
+export interface GoalPlanProgress {
+  /** Fechas del plan que ya pasaron, hoy incluido. */
+  readonly dueCount: number;
+  /** Cuántos aportes faltan, al importe elegido. Sale del saldo. */
+  readonly remainingContributions: number;
+  /** Lo que tendría que estar apartado a hoy. Nunca más que el objetivo. */
+  readonly expectedToDateMinor: bigint;
+  /** Lo que falta de lo que ya venció. Cero si está al día. */
+  readonly behindMinor: bigint;
+  readonly nextDate: CalendarDate | null;
+  /** Cuándo se llegaría si el plan se cumple. */
+  readonly arrivalDate: CalendarDate | null;
+}
+
+export const goalPlanProgress = (options: {
+  readonly plan: GoalPlan;
+  readonly targetMinor: bigint;
+  readonly savedMinor: bigint;
+  readonly today: CalendarDate;
+}): GoalPlanProgress => {
+  const plan: InstallmentPlan = { ...options.plan, maxInstallments: null };
+
+  const progress = planProgress({
+    plan,
+    totalMinor: options.targetMinor,
+    coveredMinor: options.savedMinor,
+    today: options.today,
+  });
+
+  return {
+    dueCount: progress.dueCount,
+    remainingContributions: progress.remainingInstallments,
+    expectedToDateMinor: progress.expectedToDateMinor,
+    behindMinor: progress.behindMinor,
+    nextDate: progress.nextDate,
+    arrivalDate: progress.completionDate,
+  };
 };

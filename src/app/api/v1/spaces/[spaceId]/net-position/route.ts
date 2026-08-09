@@ -26,14 +26,19 @@ export const GET = route<undefined, Params>(
   async ({ access, db }) => {
     const space = await systemClient().space.findUniqueOrThrow({
       where: { id: access.spaceId },
-      select: { primaryCurrency: true },
+      select: { primaryCurrency: true, timezone: true },
     });
 
+    // El timezone decide qué día es "hoy" para buscar la cotización vigente.
     return json({
-      position: await netPositionOf(db, {
-        spaceId: access.spaceId,
-        primaryCurrency: space.primaryCurrency,
-      }),
+      position: await netPositionOf(
+        db,
+        {
+          spaceId: access.spaceId,
+          primaryCurrency: space.primaryCurrency,
+        },
+        space.timezone,
+      ),
     });
   },
 );

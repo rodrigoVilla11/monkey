@@ -55,8 +55,16 @@ export default function NewTransactionPage() {
   const timezone = session.data?.timezone ?? "Europe/Madrid";
 
   const active = accounts.data?.filter((a) => !a.isArchived) ?? [];
+  /**
+   * Sin elección explícita manda la principal, y recién después la primera de
+   * la lista. Ese "primera de la lista" era un orden arbitrario: renombrar una
+   * cuenta podía cambiar de dónde salía la plata por defecto.
+   */
   const selectedAccount =
-    active.find((a) => a.id === accountId) ?? active[0] ?? null;
+    active.find((a) => a.id === accountId) ??
+    active.find((a) => a.isDefault) ??
+    active[0] ??
+    null;
   const currency = selectedAccount?.currency ?? space?.primaryCurrency ?? "EUR";
 
   const amount = digits === "" ? 0n : BigInt(digits);
@@ -117,6 +125,10 @@ export default function NewTransactionPage() {
               key={option}
               type="button"
               onClick={() => {
+                // Solo se limpia la categoría si el tipo CAMBIÓ. Tocar el
+                // botón que ya estaba activo borraba en silencio la categoría
+                // elegida, y el gasto se guardaba sin ella.
+                if (option === type) return;
                 setType(option);
                 setCategory(null);
               }}
@@ -159,8 +171,14 @@ export default function NewTransactionPage() {
       />
 
       <section className="space-y-2">
-        <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {/* Qué hay elegido, dicho con todas las letras: la grilla se scrollea
+            y el anillo de la elegida puede quedar fuera de la pantalla en el
+            momento de guardar. */}
+        <h2 className="flex items-baseline justify-between text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Categoría
+          <span className="normal-case">
+            {category === null ? "sin elegir" : category.name}
+          </span>
         </h2>
         {categories.data === undefined ? (
           <div className="grid grid-cols-4 gap-2">

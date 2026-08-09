@@ -195,7 +195,13 @@
 }
 
 @layer components {
-  /* Único contenedor con scroll de la app: aísla el bounce del documento. */
+  /* Único contenedor con scroll de la app: aísla el bounce del documento.
+
+     Va SIEMPRE sobre un elemento con el alto acotado (una altura definida, o
+     un item de flex que pueda achicarse). Si el elemento crece con su
+     contenido no le queda nada que scrollear, y `overscroll-behavior: contain`
+     —que existe para que el bounce no se propague— tampoco deja que la rueda
+     ni el dedo lleguen al documento: la pantalla queda clavada. */
   .app-scroll {
     overflow-y: auto;
     overscroll-behavior-y: contain;

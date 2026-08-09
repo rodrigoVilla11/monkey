@@ -35,6 +35,7 @@ const toDTO = (row: {
   sortOrder: number;
   isArchived: boolean;
   includeInNetWorth: boolean;
+  isDefault: boolean;
   creditClosingDay: number | null;
   creditDueDay: number | null;
   createdAt: Date;
@@ -49,6 +50,7 @@ const toDTO = (row: {
   sortOrder: row.sortOrder,
   isArchived: row.isArchived,
   includeInNetWorth: row.includeInNetWorth,
+  isDefault: row.isDefault,
   creditClosingDay: row.creditClosingDay,
   creditDueDay: row.creditDueDay,
   createdAt: row.createdAt.toISOString(),
@@ -65,6 +67,7 @@ const SELECT = {
   sortOrder: true,
   isArchived: true,
   includeInNetWorth: true,
+  isDefault: true,
   creditClosingDay: true,
   creditDueDay: true,
   createdAt: true,
@@ -227,6 +230,18 @@ export const createAccount = async (
     select: { sortOrder: true },
   });
 
+  /**
+   * La primera cuenta del Space queda como principal sin que nadie lo pida: no
+   * existe un Space donde "ninguna es la principal" sea una respuesta útil, y
+   * obligar a entrar a editarla después de crear la única cuenta que hay sería
+   * pedir una decisión que ya está tomada.
+   */
+  const wantsDefault = input.isDefault ?? !(await hasDefault(db));
+
+  // Antes del INSERT: el índice único parcial rechazaría la fila si quedara
+  // otra principal en pie, y el error sería un constraint, no una explicación.
+  if (wantsDefault) await clearOtherDefaults(db, null);
+
   const row = await db.account.create({
     data: {
       spaceId,
@@ -240,11 +255,39 @@ export const createAccount = async (
       creditDueDay: input.creditDueDay ?? null,
       includeInNetWorth: input.includeInNetWorth ?? true,
       sortOrder: (last?.sortOrder ?? -1) + 1,
+      isDefault: wantsDefault,
     },
     select: SELECT,
   });
 
   return toDTO(row);
+};
+
+/** Si el Space ya tiene una principal en pie. */
+const hasDefault = async (db: ScopedDb): Promise<boolean> =>
+  (await db.account.count({
+    where: { isDefault: true, isArchived: false },
+  })) > 0;
+
+/**
+ * Le saca la marca a las demás.
+ *
+ * El índice único parcial de la base ya impide que queden dos, pero rechazando
+ * el UPDATE con un error de constraint. Esto hace lo que la persona quiso
+ * decir —"esta es la principal ahora"— en vez de pedirle que primero
+ * desmarque la otra.
+ */
+const clearOtherDefaults = async (
+  db: ScopedDb,
+  keepId: string | null,
+): Promise<void> => {
+  await db.account.updateMany({
+    where: {
+      isDefault: true,
+      ...(keepId === null ? {} : { id: { not: keepId } }),
+    },
+    data: { isDefault: false },
+  });
 };
 
 export const updateAccount = async (
@@ -264,6 +307,10 @@ export const updateAccount = async (
   const type = input.type ?? existing.type;
   const clearCreditDays = type !== "CREDIT_CARD";
 
+  // La anterior pierde la marca antes de que esta la tome: el índice único
+  // parcial rechazaría el UPDATE si hubiera dos a la vez.
+  if (input.isDefault === true) await clearOtherDefaults(db, accountId);
+
   const row = await db.account.update({
     where: { id: accountId },
     data: {
@@ -278,6 +325,7 @@ export const updateAccount = async (
       ...(input.includeInNetWorth !== undefined
         ? { includeInNetWorth: input.includeInNetWorth }
         : {}),
+      ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
       ...(clearCreditDays
         ? { creditClosingDay: null, creditDueDay: null }
         : {
@@ -306,9 +354,15 @@ export const setArchived = async (
   });
   if (existing === null) throw errors.notFound("No se encontró la cuenta");
 
+  /**
+   * Archivar la principal le saca la marca. Una principal archivada no se
+   * ofrece en ningún lado, así que sería una marca que no significa nada — y
+   * al desarchivarla volvería a aparecer como principal meses después, cuando
+   * ya hay otra.
+   */
   const row = await db.account.update({
     where: { id: accountId },
-    data: { isArchived },
+    data: { isArchived, ...(isArchived ? { isDefault: false } : {}) },
     select: SELECT,
   });
 

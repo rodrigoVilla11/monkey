@@ -1,5 +1,7 @@
 import { addDays, differenceInDays, type CalendarDate } from "./dates";
 import { divideRoundHalfUp } from "./money";
+import { planProgress } from "./plan";
+import type { RecurrenceFrequency } from "./recurrence";
 
 /**
  * Deudas: saldo, avance y proyección. Lógica pura, sin base de datos.
@@ -91,6 +93,93 @@ export const monthlyInterestCost = (
   return divideRoundHalfUp(remainingMinor * BigInt(interestRateBps), 120_000n);
 };
 
+// ─────────────────────────── plan de pago/cobro ──────────────────────────────
+
+/**
+ * El acuerdo: cuánto y cada cuánto.
+ *
+ * No es una cuota calculada —eso sigue sin hacerse— sino lo que dos personas se
+ * dijeron: "te pago 300 por mes desde el 5 de marzo". Todo lo que sale de acá
+ * es aritmética sobre ese número y sobre los pagos que se registraron, nunca
+ * una predicción sobre lo que va a hacer el deudor.
+ *
+ * Las fechas las calcula el motor de recurrencia, el mismo de los movimientos
+ * programados: un plan mensual arrancado un 31 vuelve al 31 después de febrero
+ * en vez de mudarse al 28 para siempre.
+ */
+export interface DebtPlan {
+  readonly amountMinor: bigint;
+  readonly frequency: RecurrenceFrequency;
+  /** Cada cuántos períodos. Quincenal = WEEKLY cada 2. */
+  readonly interval: number;
+  readonly startDate: CalendarDate;
+  /** Cuotas pactadas: topea el plan. `null` = hasta saldar. */
+  readonly installmentsTotal: number | null;
+}
+
+export interface DebtPlanProgress {
+  /** Fechas del plan que ya pasaron, hoy incluido. */
+  readonly dueCount: number;
+  /**
+   * Cuántas cuotas faltan para saldarla, al importe pactado.
+   *
+   * Sale del SALDO, no de contar pagos: si alguien adelantó tres cuotas de una,
+   * faltan tres menos aunque haya hecho un solo pago. La última puede ser más
+   * chica —es lo que sobra— y por eso se redondea para arriba.
+   */
+  readonly remainingInstallments: number;
+  /** Lo que tendría que estar cobrado a hoy. Nunca más que el total. */
+  readonly expectedToDateMinor: bigint;
+  /** Lo que falta de lo YA vencido. Cero si está al día. */
+  readonly behindMinor: bigint;
+  /** La próxima fecha del plan, o `null` si ya no quedan. */
+  readonly nextDate: CalendarDate | null;
+  /** Cuándo quedaría saldada si el plan se cumple. */
+  readonly payoffDate: CalendarDate | null;
+  /**
+   * Si el plan alcanza a cubrir la deuda. `false` cuando las cuotas pactadas se
+   * quedan cortas —10 de 100 para una deuda de 5.000— y hay que decirlo: es un
+   * acuerdo que no cierra, y descubrirlo en la última cuota es tarde.
+   */
+  readonly coversDebt: boolean;
+}
+
+/**
+ * La cuenta la hace `shared/plan.ts`, que comparten las metas de ahorro:
+ * apartar 96 por semana para una bici y cobrar 300 por mes de un préstamo son
+ * el mismo problema con otro sustantivo.
+ *
+ * Lo que queda acá es el vocabulario de las deudas —`payoffDate`,
+ * `coversDebt`—, porque una deuda se salda y una meta se alcanza, y llamarlas
+ * igual haría que ninguna de las dos pantallas se leyera bien.
+ */
+export const debtPlanProgress = (options: {
+  readonly plan: DebtPlan;
+  readonly originalMinor: bigint;
+  readonly paidMinor: bigint;
+  readonly today: CalendarDate;
+}): DebtPlanProgress => {
+  const progress = planProgress({
+    plan: {
+      ...options.plan,
+      maxInstallments: options.plan.installmentsTotal,
+    },
+    totalMinor: options.originalMinor,
+    coveredMinor: options.paidMinor,
+    today: options.today,
+  });
+
+  return {
+    dueCount: progress.dueCount,
+    remainingInstallments: progress.remainingInstallments,
+    expectedToDateMinor: progress.expectedToDateMinor,
+    behindMinor: progress.behindMinor,
+    nextDate: progress.nextDate,
+    payoffDate: progress.completionDate,
+    coversDebt: progress.coversTotal,
+  };
+};
+
 // ────────────────────────────── proyección ───────────────────────────────────
 
 export type DebtStatus = "SETTLED" | "ON_TRACK" | "BEHIND" | "OVERDUE";
@@ -121,8 +210,16 @@ export const debtForecast = (options: {
   /** Fecha del primer pago. Sin ella no hay ritmo que medir. */
   readonly firstPaymentDate: CalendarDate | null;
   readonly today: CalendarDate;
+  /**
+   * Progreso del plan pactado, si hay uno. Manda sobre el ritmo estimado: el
+   * plan es lo que dos personas acordaron y el ritmo es una extrapolación
+   * nuestra. Cuando discrepan, gana el acuerdo.
+   */
+  readonly plan?: DebtPlanProgress | null;
 }): DebtForecast => {
-  const { remainingMinor, dueDate, today } = options;
+  const { remainingMinor, dueDate, today, plan } = options;
+
+  const behindOnPlan = plan != null && plan.behindMinor > 0n;
 
   const actualPerMonthMinor = paceOf(
     options.paidMinor,
@@ -147,9 +244,13 @@ export const debtForecast = (options: {
   );
 
   if (dueDate === null) {
-    // Sin vencimiento no se puede estar atrasado; la deuda simplemente baja.
+    /**
+     * Sin vencimiento la deuda simplemente baja... salvo que haya un plan. Ahí
+     * sí hay contra qué estar atrasado, y es justamente el caso de la plata que
+     * te deben sin fecha de corte pero con un "te pago 300 por mes".
+     */
     return {
-      status: "ON_TRACK",
+      status: behindOnPlan ? "BEHIND" : "ON_TRACK",
       daysRemaining: null,
       requiredPerMonthMinor: null,
       actualPerMonthMinor,
@@ -183,13 +284,15 @@ export const debtForecast = (options: {
     /**
      * Sin ritmo medible todavía no se puede decir que vaya atrasada: hace menos
      * de una semana que arrancó. Se la deja en verde en vez de alarmar a
-     * alguien que anotó la deuda ayer.
+     * alguien que anotó la deuda ayer. El plan es la excepción: ahí no se
+     * estima nada, se compara contra fechas que ya pasaron.
      */
     status:
-      actualPerMonthMinor === null ||
-      actualPerMonthMinor >= requiredPerMonthMinor
-        ? "ON_TRACK"
-        : "BEHIND",
+      behindOnPlan ||
+      (actualPerMonthMinor !== null &&
+        actualPerMonthMinor < requiredPerMonthMinor)
+        ? "BEHIND"
+        : "ON_TRACK",
     daysRemaining,
     requiredPerMonthMinor,
     actualPerMonthMinor,

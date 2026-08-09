@@ -32,6 +32,11 @@ export const updateCategoryRequestSchema = z
     parentId: cuidSchema.nullable().optional(),
     sortOrder: z.number().int().min(0).max(9999).optional(),
     /**
+     * Archivar: deja de ofrecerse al cargar y el historial queda intacto. Es
+     * lo contrario de borrar, que reasigna los movimientos que la usaban.
+     */
+    isArchived: z.boolean().optional(),
+    /**
      * `kind` no se puede cambiar: una categoría de gasto con movimientos
      * cargados no puede volverse de ingreso sin invertir el signo de todo lo
      * que cuelga de ella.
@@ -47,6 +52,21 @@ export const updateCategoryRequestSchema = z
  * No hay default: obligar a elegir evita el borrado accidental de la
  * clasificación de un año entero.
  */
+export const categoryFiltersSchema = z.object({
+  kind: z.enum(CATEGORY_KINDS).optional(),
+  /**
+   * Incluir las archivadas. Solo lo pide la pantalla que las administra: el
+   * selector de la carga rápida nunca las quiere, que es el punto de
+   * archivarlas.
+   */
+  includeArchived: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .transform((v) => v === true || v === "true")
+    .optional(),
+});
+
+export type CategoryFilters = z.infer<typeof categoryFiltersSchema>;
+
 export const deleteCategoryQuerySchema = z.object({
   /** Categoría a la que reasignar los movimientos. Si no viene, quedan sin categoría. */
   reassignTo: cuidSchema.optional(),
@@ -64,6 +84,8 @@ export interface CategoryDTO {
   readonly color: string | null;
   readonly sortOrder: number;
   readonly isSystem: boolean;
+  /** No se ofrece al cargar. El historial que la usa no se toca. */
+  readonly isArchived: boolean;
 }
 
 /** Categoría con sus hijas, para el grid de la carga rápida. */

@@ -4,17 +4,16 @@ import { route } from "@/server/api/handler";
 import { json } from "@/server/api/responses";
 import { createCategory, listCategories } from "@/server/services/categories";
 import {
-  CATEGORY_KINDS,
+  categoryFiltersSchema,
   createCategoryRequestSchema,
   type CreateCategoryRequest,
 } from "@/shared/contracts/categories";
 
 export const runtime = "nodejs";
 
-const paramsSchema = z.object({
-  spaceId: z.string().min(1),
-  kind: z.enum(CATEGORY_KINDS).optional(),
-});
+const paramsSchema = z
+  .object({ spaceId: z.string().min(1) })
+  .and(categoryFiltersSchema);
 type Params = z.infer<typeof paramsSchema>;
 
 /**
@@ -27,7 +26,12 @@ type Params = z.infer<typeof paramsSchema>;
 export const GET = route<undefined, Params>(
   { params: paramsSchema, space: { minRole: "VIEWER" } },
   async ({ params, db }) =>
-    json({ categories: await listCategories(db, params.kind) }),
+    json({
+      categories: await listCategories(db, {
+        kind: params.kind,
+        includeArchived: params.includeArchived,
+      }),
+    }),
 );
 
 export const POST = route<CreateCategoryRequest, Params>(

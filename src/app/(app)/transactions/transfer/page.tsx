@@ -51,7 +51,12 @@ export default function TransferPage() {
   const timezone = session.data?.timezone ?? "Europe/Madrid";
 
   const active = accounts.data?.filter((a) => !a.isArchived) ?? [];
-  const from = active.find((a) => a.id === fromId) ?? active[0] ?? null;
+  // La principal es de donde sale la plata por defecto; el destino se elige.
+  const from =
+    active.find((a) => a.id === fromId) ??
+    active.find((a) => a.isDefault) ??
+    active[0] ??
+    null;
   // El destino por defecto es la primera cuenta que NO sea el origen: elegir la
   // misma de los dos lados es el único caso imposible.
   const to =

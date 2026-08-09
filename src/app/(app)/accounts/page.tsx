@@ -161,7 +161,16 @@ function AccountRow({
       </span>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{account.name}</p>
+        <p className="flex items-center gap-1.5 truncate font-medium">
+          {account.name}
+          {/* La principal se marca en la fila: es la que va a aparecer sola
+              al cargar, y saber cuál es sin abrir nada evita la sorpresa. */}
+          {account.isDefault && (
+            <span className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              Principal
+            </span>
+          )}
+        </p>
         <p className="text-xs text-muted-foreground">
           {ACCOUNT_TYPE_LABELS[account.type]} · {account.currency}
           {account.transactionCount > 0 &&
@@ -544,6 +553,7 @@ function EditAccountSheet({
   const [includeInNetWorth, setIncludeInNetWorth] = useState(
     account.includeInNetWorth,
   );
+  const [isDefault, setIsDefault] = useState(account.isDefault);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const update = useUpdateAccount(spaceId);
@@ -561,6 +571,9 @@ function EditAccountSheet({
         // días de tarjeta lo mira, y sin él un cierre válido daría 422.
         type,
         includeInNetWorth,
+        // Solo se manda si cambió: mandar `false` sobre la que ya era
+        // principal la dejaría sin ninguna, que no es lo que nadie pidió.
+        ...(isDefault === account.isDefault ? {} : { isDefault }),
         initialBalanceMinor: balance === "" ? "0" : toMinor(balance, exponent),
         ...(type === "CREDIT_CARD"
           ? {
@@ -612,6 +625,27 @@ function EditAccountSheet({
             includeInNetWorth={includeInNetWorth}
             onIncludeInNetWorth={setIncludeInNetWorth}
           />
+
+          {/* Va en editar y no en crear: se elige entre las que ya existen, y
+              la primera cuenta del Space queda principal sola. */}
+          <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div className="min-w-0">
+              <Label htmlFor="account-default">Cuenta principal</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {account.isDefault
+                  ? "Es la que viene elegida al cargar un movimiento o una transferencia. Para cambiarla, marcá otra: hay una sola por espacio."
+                  : "Viene elegida al cargar un movimiento o una transferencia. Marcarla se la saca a la que lo sea hoy."}
+              </p>
+            </div>
+            <Switch
+              id="account-default"
+              checked={isDefault}
+              // Desmarcar la principal dejaría al espacio sin ninguna; se
+              // cambia marcando otra, que es lo que la gente quiere decir.
+              disabled={account.isDefault}
+              onCheckedChange={setIsDefault}
+            />
+          </div>
 
           <p className="text-xs text-muted-foreground">
             La moneda ({account.currency}) no se puede cambiar: los movimientos
