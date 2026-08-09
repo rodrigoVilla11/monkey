@@ -15,7 +15,7 @@ import { RECURRENCE_FREQUENCIES } from "./recurring";
  *
  * Una deuda es un acuerdo con alguien —"le debo 5.000 a mi hermano", "el
  * préstamo del coche"— y una lista de pagos. El saldo es `original − pagos`:
- * Monkey registra, no amortiza. Ver `shared/debt.ts` para el porqué.
+ * monKey registra, no amortiza. Ver `shared/debt.ts` para el porqué.
  *
  * Módulo puro: sin Next, sin Prisma, sin React.
  */
@@ -183,7 +183,7 @@ export interface DebtDTO {
   readonly interestRateBps: number | null;
   /**
    * Lo que cuesta por mes el saldo pendiente a esa tasa. **No es una cuota**:
-   * Monkey no calcula el plan de amortización de nadie.
+   * monKey no calcula el plan de amortización de nadie.
    */
   readonly monthlyInterestCost: MoneyDTO | null;
 

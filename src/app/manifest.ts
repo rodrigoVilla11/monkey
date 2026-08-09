@@ -9,8 +9,8 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Monkey · Finanzas",
-    short_name: "Monkey",
+    name: "monKey · Finanzas",
+    short_name: "monKey",
     description: "Finanzas personales y compartidas",
     id: "/",
     start_url: "/",

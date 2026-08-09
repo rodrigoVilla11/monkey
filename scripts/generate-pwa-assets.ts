@@ -7,9 +7,8 @@
  * cambiar el color de marca es editar una constante y volver a correr esto,
  * no reexportar diez archivos a mano.
  *
- * El logo es geometría pura, sin tipografías ni emoji: un emoji renderizado
- * depende de qué fuente tenga instalada la máquina que corre el script, y el
- * mismo comando daría resultados distintos en macOS, Linux y Windows.
+ * El dibujo en sí vive en `pwa-assets.config`, que es lo que también importa la
+ * app para pintar la marca en pantalla.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -18,40 +17,15 @@ import sharp from "sharp";
 import {
   APPLE_TOUCH_SIZES,
   BRAND,
+  COMPACT_BELOW,
   ICON_SIZES,
   SPLASH_SCREENS,
   iconFileName,
+  monkeyMark,
 } from "./pwa-assets.config";
 
 const ICONS_DIR = join(process.cwd(), "public", "icons");
 const SPLASH_DIR = join(process.cwd(), "public", "splash");
-
-/**
- * Carita de mono, en un viewBox de 100×100.
- *
- * `scale` encoge el dibujo hacia el centro. Se usa para los íconos maskable:
- * Android recorta hasta un 20% por cada lado, así que todo lo que importa
- * tiene que caber en el 60% central o se come las orejas — literalmente.
- */
-const monkeyMark = (scale: number): string => {
-  const offset = (100 - 100 * scale) / 2;
-
-  return `
-    <g transform="translate(${String(offset)} ${String(offset)}) scale(${String(scale)})">
-      <circle cx="22" cy="34" r="15" fill="${BRAND.accent}"/>
-      <circle cx="78" cy="34" r="15" fill="${BRAND.accent}"/>
-      <circle cx="22" cy="34" r="7"  fill="${BRAND.background}" opacity="0.35"/>
-      <circle cx="78" cy="34" r="7"  fill="${BRAND.background}" opacity="0.35"/>
-      <ellipse cx="50" cy="48" rx="30" ry="31" fill="${BRAND.accent}"/>
-      <ellipse cx="50" cy="60" rx="21" ry="18" fill="${BRAND.foreground}" opacity="0.92"/>
-      <circle cx="39" cy="44" r="4.5" fill="${BRAND.background}"/>
-      <circle cx="61" cy="44" r="4.5" fill="${BRAND.background}"/>
-      <ellipse cx="44" cy="57" rx="2.6" ry="2" fill="${BRAND.background}" opacity="0.65"/>
-      <ellipse cx="56" cy="57" rx="2.6" ry="2" fill="${BRAND.background}" opacity="0.65"/>
-      <path d="M40 66 Q50 73 60 66" stroke="${BRAND.background}" stroke-width="3"
-            stroke-linecap="round" fill="none" opacity="0.65"/>
-    </g>`;
-};
 
 /**
  * Ícono cuadrado.
@@ -66,7 +40,7 @@ const iconSvg = (size: number, maskable: boolean): string => {
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${String(size)}" height="${String(size)}" viewBox="0 0 100 100">
     <rect width="100" height="100" rx="${String((radius / size) * 100)}" fill="${BRAND.background}"/>
-    ${monkeyMark(scale)}
+    ${monkeyMark({ scale, compact: size < COMPACT_BELOW })}
   </svg>`;
 };
 
@@ -79,7 +53,7 @@ const splashSvg = (width: number, height: number): string => {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${String(width)}" height="${String(height)}">
     <rect width="${String(width)}" height="${String(height)}" fill="${BRAND.background}"/>
     <svg x="${String(x)}" y="${String(y)}" width="${String(logo)}" height="${String(logo)}" viewBox="0 0 100 100">
-      ${monkeyMark(0.9)}
+      ${monkeyMark({ scale: 0.9 })}
     </svg>
   </svg>`;
 };

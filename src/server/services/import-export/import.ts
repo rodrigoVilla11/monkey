@@ -323,7 +323,7 @@ const parseRow = (
 /**
  * Fechas en los formatos que aparecen de verdad.
  *
- * ISO primero porque es lo que exporta Monkey. Después dd/mm/aaaa, que es lo
+ * ISO primero porque es lo que exporta monKey. Después dd/mm/aaaa, que es lo
  * que usan los bancos españoles y argentinos. **No se intenta mm/dd/aaaa**: es
  * indistinguible de dd/mm hasta el día 13 y equivocarse mueve un gasto tres
  * meses en silencio. Quien tenga un archivo americano lo convierte antes.

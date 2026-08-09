@@ -29,7 +29,10 @@ const layout = (
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:24px 0;">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:12px;padding:32px;">
-        <tr><td style="font-size:28px;padding-bottom:8px;">🐒</td></tr>
+        <!-- La marca va como texto y no como imagen: casi todos los clientes
+             bloquean las imágenes remotas hasta que el lector las habilita, y
+             un encabezado que arranca roto no es un buen primer contacto. -->
+        <tr><td style="font-size:22px;font-weight:700;letter-spacing:-0.5px;color:#18181b;padding-bottom:12px;">mon<span style="color:#b45309;">K</span>ey</td></tr>
         <tr><td style="font-size:20px;font-weight:600;color:#18181b;padding-bottom:16px;">${escapeHtml(title)}</td></tr>
         <tr><td style="font-size:15px;line-height:1.6;color:#3f3f46;">${body}</td></tr>
         ${
@@ -44,7 +47,7 @@ const layout = (
             : ""
         }
         <tr><td style="padding-top:28px;border-top:1px solid #e4e4e7;margin-top:24px;font-size:12px;color:#a1a1aa;">
-          Monkey · finanzas personales y compartidas
+          monKey · finanzas personales y compartidas
         </td></tr>
       </table>
     </td></tr>
@@ -57,16 +60,16 @@ export const verifyEmailTemplate = (
   url: string,
   hours: number,
 ): Omit<MailMessage, "to"> => ({
-  subject: "Verificá tu email · Monkey",
+  subject: "Verificá tu email · monKey",
   html: layout(
     `Hola, ${name}`,
-    `Confirmá tu dirección de email para empezar a usar Monkey. El enlace vence en ${String(hours)} horas.`,
+    `Confirmá tu dirección de email para empezar a usar monKey. El enlace vence en ${String(hours)} horas.`,
     { label: "Verificar email", url },
   ),
   text: [
     `Hola, ${name}`,
     "",
-    "Confirmá tu dirección de email para empezar a usar Monkey:",
+    "Confirmá tu dirección de email para empezar a usar monKey:",
     url,
     "",
     `El enlace vence en ${String(hours)} horas.`,
@@ -78,7 +81,7 @@ export const passwordResetTemplate = (
   url: string,
   minutes: number,
 ): Omit<MailMessage, "to"> => ({
-  subject: "Restablecer tu contraseña · Monkey",
+  subject: "Restablecer tu contraseña · monKey",
   html: layout(
     `Hola, ${name}`,
     `Pediste restablecer tu contraseña. El enlace vence en ${String(minutes)} minutos y solo se puede usar una vez.<br><br>` +
@@ -109,17 +112,17 @@ export const invitationTemplate = (
   url: string,
   days: number,
 ): Omit<MailMessage, "to"> => ({
-  subject: `${inviterName} te invitó a ${spaceName} · Monkey`,
+  subject: `${inviterName} te invitó a ${spaceName} · monKey`,
   html: layout(
     `Te invitaron a ${spaceName}`,
     `<strong>${escapeHtml(inviterName)}</strong> te invitó a compartir el espacio ` +
-      `<strong>${escapeHtml(spaceName)}</strong> en Monkey, con permisos de ` +
+      `<strong>${escapeHtml(spaceName)}</strong> en monKey, con permisos de ` +
       `${escapeHtml(ROLE_LABEL[role] ?? role)}.<br><br>` +
       `La invitación vence en ${String(days)} días.`,
     { label: "Ver invitación", url },
   ),
   text: [
-    `${inviterName} te invitó a compartir el espacio "${spaceName}" en Monkey,`,
+    `${inviterName} te invitó a compartir el espacio "${spaceName}" en monKey,`,
     `con permisos de ${ROLE_LABEL[role] ?? role}.`,
     "",
     url,
@@ -132,16 +135,16 @@ export const invitationTemplate = (
 export const passwordChangedTemplate = (
   name: string,
 ): Omit<MailMessage, "to"> => ({
-  subject: "Tu contraseña cambió · Monkey",
+  subject: "Tu contraseña cambió · monKey",
   html: layout(
     `Hola, ${name}`,
-    "Tu contraseña de Monkey se cambió recién y se cerraron todas las sesiones abiertas.<br><br>" +
+    "Tu contraseña de monKey se cambió recién y se cerraron todas las sesiones abiertas.<br><br>" +
       "<strong>Si no fuiste vos</strong>, restablecé tu contraseña de inmediato.",
   ),
   text: [
     `Hola, ${name}`,
     "",
-    "Tu contraseña de Monkey se cambió recién y se cerraron todas las sesiones abiertas.",
+    "Tu contraseña de monKey se cambió recién y se cerraron todas las sesiones abiertas.",
     "",
     "Si no fuiste vos, restablecé tu contraseña de inmediato.",
   ].join("\n"),

@@ -78,7 +78,7 @@ function VerifyEmailContent() {
           <div>
             <h2 className="text-lg font-semibold">Email verificado</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Ya podés usar Monkey.
+              Ya podés usar monKey.
             </p>
           </div>
           {/* Si el enlace se abrió en Safari y la app está instalada como PWA,
@@ -93,7 +93,7 @@ function VerifyEmailContent() {
             Ir a la app
           </Button>
           <p className="text-xs text-muted-foreground">
-            Si abriste este enlace desde el correo, volvé a Monkey desde tu
+            Si abriste este enlace desde el correo, volvé a monKey desde tu
             pantalla de inicio.
           </p>
         </div>

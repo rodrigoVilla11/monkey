@@ -10,14 +10,14 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Monkey",
-    template: "%s · Monkey",
+    default: "monKey",
+    template: "%s · monKey",
   },
   description: "Finanzas personales y compartidas",
-  applicationName: "Monkey",
+  applicationName: "monKey",
   appleWebApp: {
     capable: true,
-    title: "Monkey",
+    title: "monKey",
     statusBarStyle: "black-translucent",
   },
   formatDetection: {

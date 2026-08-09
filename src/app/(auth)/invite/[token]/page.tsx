@@ -57,7 +57,7 @@ export default function InvitePage() {
             : "El enlace no sirve o ya se usó"}
         </p>
         <Button asChild variant="outline" className="min-h-touch w-full">
-          <Link href="/">Ir a Monkey</Link>
+          <Link href="/">Ir a monKey</Link>
         </Button>
       </div>
     );

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Monkey — esquema de datos
+// monKey — esquema de datos
 //
 // Invariantes de todo el dominio financiero:
 //  · Toda entidad financiera cuelga de `spaceId`. Sin excepciones salvo

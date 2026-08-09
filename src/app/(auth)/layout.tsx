@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { BrandLockup } from "@/components/brand/logo";
+
 /**
  * Shell de las pantallas sin sesión.
  *
@@ -11,12 +13,10 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col justify-center px-6 py-10 pt-safe-top pb-safe-bottom">
       <div className="mx-auto w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <span className="text-5xl" aria-hidden>
-            🐒
-          </span>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Monkey</h1>
-        </div>
+        {/* h1 y no un div suelto: en estas pantallas la marca ES el título. */}
+        <h1 className="mb-8">
+          <BrandLockup />
+        </h1>
         {children}
       </div>
     </div>

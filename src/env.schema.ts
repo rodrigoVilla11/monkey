@@ -66,7 +66,7 @@ export const envSchema = z
 
     // ── Mail ──────────────────────────────────────────────────────────────
     MAIL_DRIVER: z.enum(["console", "smtp", "resend"]).default("console"),
-    MAIL_FROM: z.string().min(3).default("Monkey <no-reply@localhost>"),
+    MAIL_FROM: z.string().min(3).default("monKey <no-reply@localhost>"),
     RESEND_API_KEY: z.string().min(1).optional(),
     SMTP_HOST: z.string().min(1).optional(),
     SMTP_PORT: port.optional(),

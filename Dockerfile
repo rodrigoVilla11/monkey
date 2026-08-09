@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Monkey — build multi-stage para VPS
+# monKey — build multi-stage para VPS
 #
 # Notas de decisión:
 #  · bookworm-slim (glibc), no alpine. @node-rs/argon2 trae binarios precompilados

@@ -8,7 +8,7 @@ import type { RecurrenceFrequency } from "./recurrence";
  *
  * ── La decisión que define el módulo: registra, NO amortiza ──────────────────
  *
- * Monkey no calcula la cuota de un préstamo. Podría —la fórmula francesa son
+ * monKey no calcula la cuota de un préstamo. Podría —la fórmula francesa son
  * cuatro líneas— y sería un error: los bancos usan convenciones de días
  * distintas, cobran comisiones, meten seguros y redondean a su manera. Una cuota
  * calculada acá se desviaría de la real, y un número que se desvía tres euros

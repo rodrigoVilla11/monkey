@@ -23,7 +23,7 @@ import { disconnect, resetDatabase, testDb } from "./helpers/db";
  *
  * Lo que más importa acá:
  *
- *  · El saldo es `original − pagos` y NO capitaliza intereses. Monkey registra,
+ *  · El saldo es `original − pagos` y NO capitaliza intereses. monKey registra,
  *    no amortiza.
  *  · Registrar un pago no crea un movimiento ni toca los saldos: si lo hiciera,
  *    cargarlo desde acá y desde la pantalla de movimientos lo contaría dos veces.

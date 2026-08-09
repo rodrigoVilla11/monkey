@@ -1,4 +1,4 @@
-# 🐒 Monkey
+# 🐒 monKey
 
 Finanzas personales y compartidas. Mobile-first, pensada para instalarse en la
 pantalla de inicio de un iPhone.

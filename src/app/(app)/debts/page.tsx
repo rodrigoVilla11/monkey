@@ -202,7 +202,7 @@ function PlanFields({
             <p className="text-xs text-muted-foreground">
               El día marca el resto: mensual desde un 31 cae el 31 de cada mes,
               y el último día en los meses que no lo tienen. Los cobros los
-              seguís cargando vos — Monkey no cobra ni genera movimientos.
+              seguís cargando vos — monKey no cobra ni genera movimientos.
             </p>
           </div>
         </>
@@ -343,7 +343,7 @@ export default function DebtsPage() {
           <HandCoins className="size-10 opacity-40" />
           <p className="text-sm">No hay deudas anotadas</p>
           <p className="max-w-xs text-xs">
-            Lo que debés y lo que te deben. Monkey lleva la cuenta de lo pagado;
+            Lo que debés y lo que te deben. monKey lleva la cuenta de lo pagado;
             no calcula cuotas ni intereses por vos.
           </p>
         </div>
@@ -827,7 +827,7 @@ function NewDebtSheet({
             />
             <p className="text-xs text-muted-foreground">
               Sirve para mostrarte cuánto cuesta por mes el saldo pendiente.
-              Monkey no calcula la cuota de tu préstamo: la que vale es la de tu
+              monKey no calcula la cuota de tu préstamo: la que vale es la de tu
               banco.
             </p>
           </div>
