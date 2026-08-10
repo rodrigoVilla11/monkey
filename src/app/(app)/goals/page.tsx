@@ -582,8 +582,9 @@ function NewGoalSheet({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              Es solo para saber dónde mirar: el progreso lo marcan tus aportes,
-              no el saldo de la cuenta.
+              El progreso lo marcan tus aportes, no el saldo de la cuenta. Pero
+              eligiéndola, lo que aportes aparece apartado ahí: la cuenta pasa a
+              mostrar cuánto queda disponible sin comerse esta meta.
             </p>
           </div>
 
@@ -773,8 +774,9 @@ function EditGoalSheet({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              Es contexto, no la fuente del progreso: el avance son los aportes
-              que cargás, no el saldo de la cuenta.
+              El avance son los aportes que cargás, no el saldo de la cuenta. Lo
+              que sí hace elegirla: lo apartado se descuenta de lo disponible de
+              esa cuenta, sin tocar su saldo.
             </p>
           </div>
 

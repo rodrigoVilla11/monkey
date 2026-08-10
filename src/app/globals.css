@@ -12,6 +12,11 @@
 :root {
   --radius: 0.75rem;
 
+  /* Alto del teclado en pantalla. Lo mantiene `layout/keyboard-inset.tsx`
+     leyendo `visualViewport`; acá está el valor de reposo, que es el que vale
+     en escritorio y antes de que corra el JS. */
+  --keyboard-inset: 0px;
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -214,5 +219,8 @@
     overflow-y: auto;
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
+    /* Para que el input que se acaba de enfocar no quede justo debajo del
+       teclado cuando el navegador lo trae a la vista. */
+    scroll-padding-bottom: var(--keyboard-inset, 0px);
   }
 }

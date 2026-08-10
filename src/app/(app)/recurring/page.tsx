@@ -8,8 +8,10 @@ import {
   Play,
   Plus,
   Trash2,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -37,7 +39,13 @@ import {
   type RecurringRuleDTO,
 } from "@/shared/contracts/recurring";
 import { getCurrencyExponent } from "@/shared/currency";
-import { formatCalendarDate, todayIn } from "@/shared/dates";
+import {
+  addDays,
+  addMonths,
+  formatCalendarDate,
+  todayIn,
+} from "@/shared/dates";
+import { scheduledTotals } from "@/shared/recurring-totals";
 import { hasAtLeast } from "@/shared/roles";
 
 const FREQUENCY_LABELS: Record<
@@ -49,6 +57,17 @@ const FREQUENCY_LABELS: Record<
   MONTHLY: "Mensual",
   YEARLY: "Anual",
 };
+
+/**
+ * Ventanas del resumen. Son rangos móviles desde hoy y no meses de calendario
+ * a propósito: la pregunta que contesta esta pantalla es "qué se viene", y un
+ * día 25 "este mes" son cinco días, no un mes.
+ */
+const PERIODS = [
+  { months: 1, chip: "1 mes", heading: "el próximo mes" },
+  { months: 3, chip: "3 meses", heading: "los próximos 3 meses" },
+  { months: 12, chip: "12 meses", heading: "los próximos 12 meses" },
+] as const;
 
 /**
  * Movimientos programados.
@@ -63,6 +82,7 @@ export default function RecurringPage() {
   const spaceId = space?.id ?? "";
   const [showNew, setShowNew] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  const [period, setPeriod] = useState<(typeof PERIODS)[number]>(PERIODS[0]);
 
   const rules = useQuery({
     queryKey: [...spaceScopeKey(spaceId), "recurring", showInactive],
@@ -75,7 +95,21 @@ export default function RecurringPage() {
   });
 
   const locale = session.data?.locale ?? "es-ES";
+  const timezone = session.data?.timezone ?? space?.timezone ?? "Europe/Madrid";
   const canEdit = space !== undefined && hasAtLeast(space.role, "MEMBER");
+
+  const primaryCurrency = space?.primaryCurrency ?? "EUR";
+  const rulesData = rules.data;
+  const totals = useMemo(() => {
+    if (rulesData === undefined) return [];
+
+    // Ventana inclusiva: hoy + N meses − 1 día son exactamente N meses.
+    const until = addDays(addMonths(todayIn(timezone), period.months), -1);
+
+    return scheduledTotals(rulesData, until, primaryCurrency);
+  }, [rulesData, period.months, timezone, primaryCurrency]);
+
+  const singleCurrency = totals.length === 1 ? totals[0] : undefined;
 
   return (
     <div className="space-y-4 py-3">
@@ -92,6 +126,90 @@ export default function RecurringPage() {
             <Plus className="size-4" />
             Nuevo
           </Button>
+        )}
+      </div>
+
+      {/**
+       * Cuánto se viene, antes de la lista. La lista dice qué hay programado;
+       * esto dice cuánto pesa, que es la otra mitad de la pregunta.
+       */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {PERIODS.map((option) => (
+            <button
+              key={option.months}
+              type="button"
+              onClick={() => {
+                setPeriod(option);
+              }}
+              aria-pressed={option.months === period.months}
+              className={cn(
+                "min-h-touch rounded-full border px-3 text-sm",
+                option.months === period.months &&
+                  "border-primary bg-primary text-primary-foreground",
+              )}
+            >
+              {option.chip}
+            </button>
+          ))}
+        </div>
+
+        {rules.data === undefined ? (
+          <Skeleton className="h-20 w-full rounded-xl" />
+        ) : totals.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Nada programado para {period.heading}.
+          </p>
+        ) : (
+          totals.map((total) => (
+            <div key={total.currency} className="grid grid-cols-2 gap-3">
+              <Card className="gap-1 p-4">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <TrendingUp className="size-3.5 text-income" />
+                  Ingresos
+                  {totals.length > 1 && ` · ${total.currency}`}
+                </span>
+                <span className="text-lg font-semibold text-income tabular-nums">
+                  {formatMoneyDTO(total.income, locale)}
+                </span>
+              </Card>
+              <Card className="gap-1 p-4">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <TrendingDown className="size-3.5 text-expense" />
+                  Egresos
+                  {totals.length > 1 && ` · ${total.currency}`}
+                </span>
+                <span className="text-lg font-semibold text-expense tabular-nums">
+                  {formatMoneyDTO(total.expense, locale)}
+                </span>
+              </Card>
+            </div>
+          ))
+        )}
+
+        {totals.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Lo que falta generar en {period.heading}
+            {/* El neto solo tiene sentido con una moneda: restar pesos a euros
+                no da un número, da una confusión. */}
+            {singleCurrency !== undefined && (
+              <>
+                {" · neto "}
+                <span
+                  className={cn(
+                    "font-medium tabular-nums",
+                    BigInt(singleCurrency.net.amountMinor) < 0n
+                      ? "text-expense"
+                      : "text-income",
+                  )}
+                >
+                  {formatMoneyDTO(singleCurrency.net, locale, {
+                    signDisplay: "always",
+                  })}
+                </span>
+              </>
+            )}
+          </p>
         )}
       </div>
 

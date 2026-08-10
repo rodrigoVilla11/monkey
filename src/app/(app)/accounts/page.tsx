@@ -212,6 +212,9 @@ function AccountRow({
     account.isArchived && "opacity-60",
   );
 
+  const hasReservations =
+    account.goalAllocations.length > 0 || account.goalsInOtherCurrency > 0;
+
   return (
     <Card className="gap-0 overflow-hidden p-0">
       {canEdit ? (
@@ -223,7 +226,100 @@ function AccountRow({
       ) : (
         <div className={shell}>{body}</div>
       )}
+
+      {hasReservations && <ReservedNote account={account} locale={locale} />}
     </Card>
+  );
+}
+
+/**
+ * De ese saldo, cuánto ya tiene dueño.
+ *
+ * Va DEBAJO del saldo y no en su lugar: el número grande sigue siendo lo que
+ * hay en la cuenta —lo que cuadra contra el extracto— y esto explica de qué
+ * está hecho. Se lee de arriba hacia abajo: el total, lo apartado, lo que queda
+ * libre, y recién después por qué metas.
+ */
+function ReservedNote({
+  account,
+  locale,
+}: {
+  account: AccountWithBalance;
+  locale: string;
+}) {
+  const available = BigInt(account.available.amountMinor);
+
+  return (
+    <div className="space-y-2 border-t bg-muted/40 px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3 text-xs">
+        <span className="text-muted-foreground">Apartado para metas</span>
+        <span className="font-medium tabular-nums">
+          −{formatMoneyDTO(account.reserved, locale)}
+        </span>
+      </div>
+
+      <div className="flex items-baseline justify-between gap-3 border-t pt-2 text-xs">
+        <span className="font-medium">Disponible</span>
+        <span
+          className={cn(
+            "font-semibold tabular-nums",
+            available < 0n && "text-expense",
+          )}
+        >
+          {formatMoneyDTO(account.available, locale)}
+        </span>
+      </div>
+
+      {/* Que lo apartado supere al saldo no se tapa: significa que la plata de
+          alguna meta ya no está, y ocultarlo dejaría la barra de progreso
+          mintiendo sin que nadie se entere. */}
+      {available < 0n && (
+        <p className="text-xs text-expense">
+          Hay más apartado que saldo en la cuenta. O falta cargar un movimiento,
+          o esa plata ya se gastó y el retiro de la meta no se registró.
+        </p>
+      )}
+
+      {account.goalAllocations.length > 0 && (
+        <ul className="space-y-1 pt-0.5">
+          {account.goalAllocations.map((goal) => (
+            <li
+              key={goal.goalId}
+              className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+            >
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{
+                    backgroundColor: goal.color ?? "var(--muted-foreground)",
+                  }}
+                  aria-hidden
+                />
+                <span className="truncate">{goal.name}</span>
+                {/* Una meta lograda sigue ocupando la plata hasta que se
+                    gasta: se dice, para que no parezca un error. */}
+                {goal.achieved && (
+                  <span className="shrink-0 text-[10px]">· lograda</span>
+                )}
+              </span>
+              <span className="tabular-nums">
+                {formatMoneyDTO(goal.amount, locale)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {account.goalsInOtherCurrency > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {account.goalsInOtherCurrency === 1
+            ? "Hay 1 meta en otra moneda"
+            : `Hay ${String(account.goalsInOtherCurrency)} metas en otra moneda`}{" "}
+          apuntando a esta cuenta. No se suman acá: haría falta una cotización y
+          el número dejaría de ser exacto.
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -137,10 +137,45 @@ export interface AccountDTO {
   readonly createdAt: string;
 }
 
+/** Lo que una meta tiene apartado dentro de una cuenta. */
+export interface GoalAllocation {
+  readonly goalId: string;
+  readonly name: string;
+  readonly color: string | null;
+  readonly amount: MoneyDTO;
+  /** Una meta lograda sigue ocupando la plata hasta que se gasta. */
+  readonly achieved: boolean;
+}
+
 /** Cuenta con su saldo calculado. El saldo NUNCA se guarda desnormalizado. */
 export interface AccountWithBalance extends AccountDTO {
   readonly balance: MoneyDTO;
   readonly transactionCount: number;
+  /**
+   * Lo que hay apartado para metas dentro de esta cuenta.
+   *
+   * No está restado de `balance` a propósito: el saldo es lo que el banco
+   * tiene —y tiene que cuadrar contra el extracto— mientras que esto es una
+   * intención. Son dos cifras ciertas que responden preguntas distintas: "cuánto
+   * hay" y "de eso, cuánto ya tiene dueño".
+   */
+  readonly reserved: MoneyDTO;
+  /**
+   * `balance − reserved`: lo que se puede gastar sin comerse una meta.
+   *
+   * Puede ser NEGATIVO —más apartado que saldo—, y se muestra así en vez de
+   * recortarlo a cero: significa que la plata de alguna meta ya no está, y
+   * taparlo dejaría la barra de progreso mintiendo sin que nadie se entere.
+   */
+  readonly available: MoneyDTO;
+  /** El desglose de `reserved`, de mayor a menor. Vacío si no hay nada. */
+  readonly goalAllocations: readonly GoalAllocation[];
+  /**
+   * Cuántas metas apuntan a esta cuenta desde OTRA moneda. No entran en
+   * `reserved` porque sumarlas pediría una cotización inventada; se cuentan
+   * para poder avisarlo en vez de que la plata desaparezca en silencio.
+   */
+  readonly goalsInOtherCurrency: number;
   /**
    * El saldo convertido a la moneda primaria del Space, al tipo de cambio de
    * HOY. `null` si la cuenta ya está en la primaria o si no hay cotización.

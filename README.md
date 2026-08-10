@@ -471,6 +471,14 @@ pantalla no promete lo contrario.
   puro registro. Y el progreso de una meta son sus aportes, no el saldo de
   ninguna cuenta: atarlo al saldo se rompe apenas esa cuenta se use para otra
   cosa, y con dos metas sobre la misma cuenta las dos mostrarían el total.
+- **Lo apartado se calcula, no se descuenta.** Si una meta tiene cuenta, sus
+  aportes aparecen como apartados ahí y la cuenta muestra `saldo − apartado =
+disponible`. El saldo no se toca: es lo que el banco tiene y tiene que cuadrar
+  contra el extracto; lo apartado es una intención. Son dos cifras ciertas que
+  responden preguntas distintas —"cuánto hay" y "de eso, cuánto ya tiene
+  dueño"—. Lo disponible puede dar **negativo**, y se muestra así: significa que
+  la plata de alguna meta ya no está. Una meta en otra moneda que apunte a la
+  cuenta no se suma —haría falta una cotización inventada—, se avisa.
 - **Multi-moneda desde el día uno.** Cada transacción congela su tipo de cambio
   al crearse. Los reportes históricos nunca se recalculan con la tasa de hoy.
 - **`spaceId` va en la URL**, no en el body ni en un header: hace que las

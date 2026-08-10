@@ -253,13 +253,29 @@ export default function DashboardPage() {
                 />
                 {account.name}
               </span>
-              <span
-                className={cn(
-                  "text-sm font-medium tabular-nums",
-                  BigInt(account.balance.amountMinor) < 0n && "text-expense",
+              <span className="text-right">
+                <span
+                  className={cn(
+                    "block text-sm font-medium tabular-nums",
+                    BigInt(account.balance.amountMinor) < 0n && "text-expense",
+                  )}
+                >
+                  {formatMoneyDTO(account.balance, locale)}
+                </span>
+                {/* Si hay plata con dueño, el saldo solo no alcanza: gastar
+                    hasta ahí sería comerse una meta. Se dice acá en chico y el
+                    desglose por meta vive en Cuentas. */}
+                {BigInt(account.reserved.amountMinor) > 0n && (
+                  <span
+                    className={cn(
+                      "block text-[11px] text-muted-foreground tabular-nums",
+                      BigInt(account.available.amountMinor) < 0n &&
+                        "text-expense",
+                    )}
+                  >
+                    {formatMoneyDTO(account.available, locale)} disponible
+                  </span>
                 )}
-              >
-                {formatMoneyDTO(account.balance, locale)}
               </span>
             </div>
           ))}

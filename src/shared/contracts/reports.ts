@@ -43,6 +43,13 @@ export interface AccountBalanceSummary {
   readonly color: string | null;
   readonly icon: string | null;
   readonly balance: MoneyDTO;
+  /**
+   * De ese saldo, cuánto ya está apartado para metas de esta cuenta. Cero si no
+   * hay ninguna. No está restado de `balance`: ver `AccountWithBalance`.
+   */
+  readonly reserved: MoneyDTO;
+  /** `balance − reserved`. Puede ser negativo. */
+  readonly available: MoneyDTO;
   readonly isArchived: boolean;
 }
 

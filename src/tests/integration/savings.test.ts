@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { forSpace } from "@/server/db/scoped";
 import { systemClient } from "@/server/db/system";
+import { listAccounts } from "@/server/services/accounts";
 import { accountBalances } from "@/server/services/balances";
 import { monthlyReport } from "@/server/services/reports";
 import {
@@ -750,5 +751,152 @@ describe("recordatorios del inicio", () => {
 
     const reminders = await goalReminders(forSpace(space.spaceId), TIMEZONE);
     expect(reminders).toEqual([]);
+  });
+});
+
+/**
+ * Lo apartado en una cuenta.
+ *
+ * El saldo NO se toca —eso ya lo cubre "ahorrar no es gastar"— pero de ese
+ * saldo se dice cuánto ya tiene dueño. Las dos cifras conviven: `balance` es lo
+ * que el banco tiene y `available` lo que se puede gastar sin comerse una meta.
+ */
+describe("apartado por cuenta", () => {
+  const accountNamed = async (space: Space, name: string) =>
+    (await listAccounts(forSpace(space.spaceId))).find(
+      (account) => account.name === name,
+    );
+
+  it("resta lo aportado de lo disponible sin mover el saldo", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, {
+      name: "Viaje",
+      accountId: space.savingsId,
+    });
+
+    await contribute(space, goalId, { amountMinor: "120000" });
+
+    const savings = await accountNamed(space, "Ahorro");
+
+    // El saldo sigue siendo el de la cuenta: 0 de inicial, ningún movimiento.
+    expect(savings?.balance.amountMinor).toBe("0");
+    expect(savings?.reserved.amountMinor).toBe("120000");
+    expect(savings?.available.amountMinor).toBe("-120000");
+    expect(savings?.goalAllocations).toEqual([
+      expect.objectContaining({
+        goalId,
+        name: "Viaje",
+        achieved: false,
+        amount: { amountMinor: "120000", currency: "EUR" },
+      }),
+    ]);
+  });
+
+  it("suma varias metas sobre la misma cuenta, de mayor a menor", async () => {
+    const space = await makeSpace();
+    const viaje = await addGoal(space, {
+      name: "Viaje",
+      accountId: space.accountId,
+    });
+    const bici = await addGoal(space, {
+      name: "Bici",
+      accountId: space.accountId,
+    });
+
+    await contribute(space, viaje, { amountMinor: "100000" });
+    await contribute(space, bici, { amountMinor: "250000" });
+
+    const account = await accountNamed(space, "Corriente");
+
+    expect(account?.balance.amountMinor).toBe("500000");
+    expect(account?.reserved.amountMinor).toBe("350000");
+    expect(account?.available.amountMinor).toBe("150000");
+    expect(account?.goalAllocations.map((g) => g.name)).toEqual([
+      "Bici",
+      "Viaje",
+    ]);
+  });
+
+  it("una meta sin cuenta no aparta nada de ninguna", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { name: "Suelta" });
+
+    await contribute(space, goalId, { amountMinor: "100000" });
+
+    const accounts = await listAccounts(forSpace(space.spaceId));
+
+    expect(accounts.map((a) => a.reserved.amountMinor)).toEqual(["0", "0"]);
+    expect(accounts.flatMap((a) => a.goalAllocations)).toEqual([]);
+  });
+
+  it("un retiro libera lo apartado", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, {
+      name: "Viaje",
+      accountId: space.accountId,
+    });
+
+    await contribute(space, goalId, { amountMinor: "200000" });
+    await contribute(space, goalId, { amountMinor: "-200000" });
+
+    const account = await accountNamed(space, "Corriente");
+
+    // Sin nada apartado, la meta ni siquiera figura en el desglose: una línea
+    // en cero sería ruido.
+    expect(account?.reserved.amountMinor).toBe("0");
+    expect(account?.available.amountMinor).toBe("500000");
+    expect(account?.goalAllocations).toEqual([]);
+  });
+
+  it("una meta lograda sigue ocupando la plata", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, {
+      name: "Viaje",
+      accountId: space.accountId,
+    });
+
+    await contribute(space, goalId, { amountMinor: "300000" });
+
+    const account = await accountNamed(space, "Corriente");
+
+    expect(account?.reserved.amountMinor).toBe("300000");
+    expect(account?.goalAllocations[0]?.achieved).toBe(true);
+  });
+
+  it("borrar la meta libera lo apartado", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, {
+      name: "Viaje",
+      accountId: space.accountId,
+    });
+
+    await contribute(space, goalId, { amountMinor: "100000" });
+
+    await systemClient().$transaction(async (tx) => {
+      await deleteSavingsGoal(forSpace(space.spaceId), tx, goalId);
+    });
+
+    const account = await accountNamed(space, "Corriente");
+
+    expect(account?.reserved.amountMinor).toBe("0");
+    expect(account?.goalAllocations).toEqual([]);
+  });
+
+  it("una meta en otra moneda se avisa, no se suma", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, {
+      name: "Japón",
+      accountId: space.accountId,
+      currency: "USD",
+    });
+
+    await contribute(space, goalId, { amountMinor: "100000" });
+
+    const account = await accountNamed(space, "Corriente");
+
+    expect(account?.reserved.amountMinor).toBe("0");
+    expect(account?.available.amountMinor).toBe("500000");
+    expect(account?.goalAllocations).toEqual([]);
+    expect(account?.goalsInOtherCurrency).toBe(1);
   });
 });

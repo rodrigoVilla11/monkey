@@ -3,6 +3,7 @@ import { accountBalances } from "@/server/services/balances";
 import { budgetSummary } from "@/server/services/budgets";
 import { getRateProvider } from "@/server/services/rates";
 import { goalReminders } from "@/server/services/savings";
+import { reservedByAccount } from "@/server/services/savings/reserved";
 import { groupSumInPrimary } from "./aggregate";
 import { percentageOf } from "@/shared/balance";
 import type { MoneyDTO } from "@/shared/contracts/common";
@@ -308,6 +309,7 @@ const accountSummaries = async (
       id: true,
       name: true,
       type: true,
+      currency: true,
       color: true,
       icon: true,
       isArchived: true,
@@ -315,16 +317,22 @@ const accountSummaries = async (
   });
 
   const balances = await accountBalances(db);
+  const reservations = await reservedByAccount(db, rows);
 
   return rows.map((row) => {
     const balance = balances.get(row.id);
+    const balanceMinor = balance?.balanceMinor ?? 0n;
+    const reservedMinor = reservations.get(row.id)?.reservedMinor ?? 0n;
+
     return {
       accountId: row.id,
       name: row.name,
       type: row.type,
       color: row.color,
       icon: row.icon,
-      balance: dto(balance?.balanceMinor ?? 0n, balance?.currency ?? ""),
+      balance: dto(balanceMinor, row.currency),
+      reserved: dto(reservedMinor, row.currency),
+      available: dto(balanceMinor - reservedMinor, row.currency),
       isArchived: row.isArchived,
     };
   });

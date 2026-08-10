@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { KeyboardInset } from "@/components/layout/keyboard-inset";
 import { PwaHead } from "@/components/layout/pwa-head";
 import { ServiceWorkerRegistration } from "@/components/layout/service-worker";
 import { Toaster } from "@/components/ui/sonner";
@@ -60,6 +61,7 @@ export default function RootLayout({
         <PwaHead />
       </head>
       <body className="antialiased">
+        <KeyboardInset />
         <Providers>{children}</Providers>
         {/* Los toasts van arriba: abajo chocan con la bottom nav y el FAB. */}
         <Toaster position="top-center" richColors closeButton={false} />

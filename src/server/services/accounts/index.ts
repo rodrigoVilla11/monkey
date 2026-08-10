@@ -6,6 +6,11 @@ import {
 } from "@/server/services/audit/log";
 import { accountBalances } from "@/server/services/balances";
 import { getRateProvider } from "@/server/services/rates";
+import {
+  NO_RESERVATION,
+  reservedByAccount,
+  type AccountReservation,
+} from "@/server/services/savings/reserved";
 import type {
   AccountDTO,
   AccountWithBalance,
@@ -93,6 +98,9 @@ export const listAccounts = async (
     includeArchived: options.includeArchived ?? false,
   });
 
+  // Ídem con lo apartado para metas: dos consultas para todas las cuentas.
+  const reservations = await reservedByAccount(db, rows);
+
   /**
    * Las cotizaciones se buscan UNA vez por moneda, no una por cuenta: cinco
    * cuentas en dólares son cinco filas en pantalla y una sola consulta.
@@ -116,10 +124,48 @@ export const listAccounts = async (
         options.primaryCurrency,
         rates,
       ),
+      ...reservationFields(
+        amountMinor,
+        row.currency,
+        reservations.get(row.id) ?? NO_RESERVATION,
+      ),
       transactionCount: balance?.transactionCount ?? 0,
     };
   });
 };
+
+/**
+ * Lo apartado, lo disponible y el desglose, ya en forma de DTO.
+ *
+ * Sale del saldo y de la reserva, nunca de la base: quien llama ya tiene los
+ * dos números y esto solo los resta. Está acá y no duplicado en cada pantalla
+ * para que "disponible" signifique lo mismo en todas.
+ */
+const reservationFields = (
+  balanceMinor: bigint,
+  currency: string,
+  reservation: AccountReservation,
+): Pick<
+  AccountWithBalance,
+  "reserved" | "available" | "goalAllocations" | "goalsInOtherCurrency"
+> => ({
+  reserved: {
+    amountMinor: reservation.reservedMinor.toString(),
+    currency,
+  },
+  available: {
+    amountMinor: (balanceMinor - reservation.reservedMinor).toString(),
+    currency,
+  },
+  goalAllocations: reservation.goals.map((goal) => ({
+    goalId: goal.goalId,
+    name: goal.name,
+    color: goal.color,
+    amount: { amountMinor: goal.amountMinor.toString(), currency },
+    achieved: goal.achieved,
+  })),
+  goalsInOtherCurrency: reservation.otherCurrencyGoals,
+});
 
 /**
  * Cotizaciones de cada moneda hacia la primaria, en un solo viaje por moneda.
@@ -201,6 +247,8 @@ export const getAccount = async (
     options.today,
   );
 
+  const reservations = await reservedByAccount(db, [row]);
+
   return {
     ...toDTO(row),
     balancePrimary: convertBalance(
@@ -210,11 +258,14 @@ export const getAccount = async (
       rates,
     ),
     balance: {
-      amountMinor: (
-        balance?.balanceMinor ?? row.initialBalanceMinor
-      ).toString(),
+      amountMinor: amountMinor.toString(),
       currency: row.currency,
     },
+    ...reservationFields(
+      amountMinor,
+      row.currency,
+      reservations.get(row.id) ?? NO_RESERVATION,
+    ),
     transactionCount: balance?.transactionCount ?? 0,
   };
 };
