@@ -26,6 +26,8 @@ interface Fixture {
   readonly spaceId: string;
   readonly userId: string;
   readonly accountId: string;
+  /** Segunda cuenta, para probar el alcance por cuentas. */
+  readonly otherAccountId: string;
   readonly parentCategoryId: string;
   readonly childCategoryId: string;
   readonly otherCategoryId: string;
@@ -67,6 +69,15 @@ const buildFixture = async (label: string): Promise<Fixture> => {
     },
   });
 
+  const otherAccount = await db.account.create({
+    data: {
+      spaceId: space.id,
+      name: "Tarjeta",
+      type: "CREDIT_CARD",
+      currency: "EUR",
+    },
+  });
+
   const parent = await db.category.create({
     data: { spaceId: space.id, name: "Alimentación", kind: "EXPENSE" },
   });
@@ -86,6 +97,7 @@ const buildFixture = async (label: string): Promise<Fixture> => {
     spaceId: space.id,
     userId: user.id,
     accountId: account.id,
+    otherAccountId: otherAccount.id,
     parentCategoryId: parent.id,
     childCategoryId: child.id,
     otherCategoryId: other.id,
@@ -103,6 +115,7 @@ const spend = async (
     readonly amountPrimaryMinor?: bigint;
     readonly type?: "EXPENSE" | "INCOME" | "TRANSFER";
     readonly transferDirection?: "OUT" | "IN";
+    readonly accountId?: string;
   } = {},
 ): Promise<void> => {
   const type = extra.type ?? "EXPENSE";
@@ -110,7 +123,7 @@ const spend = async (
   await forSpace(fixture.spaceId).transaction.create({
     data: {
       spaceId: fixture.spaceId,
-      accountId: fixture.accountId,
+      accountId: extra.accountId ?? fixture.accountId,
       categoryId,
       createdByUserId: fixture.userId,
       createdByName: "Dueño",
@@ -175,8 +188,9 @@ describe("creación", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("no deja dos presupuestos activos sobre la misma categoría", async () => {
-    // Serían dos topes simultáneos y dos alertas contradictorias.
+  it("permite dos presupuestos sobre la misma categoría", async () => {
+    // Es lo que hace útil el alcance por cuentas: "comida con la tarjeta" y
+    // "comida en efectivo" son dos topes distintos sobre la misma categoría.
     const db = forSpace(a.spaceId);
     const input = {
       name: "Comida",
@@ -185,10 +199,49 @@ describe("creación", () => {
       categoryId: a.parentCategoryId,
     };
 
-    await createBudget(db, a.spaceId, "EUR", TIMEZONE, input);
-    await expect(
-      createBudget(db, a.spaceId, "EUR", TIMEZONE, { ...input, name: "Otro" }),
-    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await createBudget(db, a.spaceId, "EUR", TIMEZONE, {
+      ...input,
+      accountIds: [a.accountId],
+    });
+    await createBudget(db, a.spaceId, "EUR", TIMEZONE, {
+      ...input,
+      name: "Comida tarjeta",
+      accountIds: [a.otherAccountId],
+    });
+
+    expect(await listBudgets(db, TIMEZONE)).toHaveLength(2);
+  });
+
+  it("guarda el alcance por cuentas y lo devuelve", async () => {
+    const budget = await createBudget(
+      forSpace(a.spaceId),
+      a.spaceId,
+      "EUR",
+      TIMEZONE,
+      {
+        name: "Tarjetas",
+        period: "MONTHLY",
+        amountMinor: "50000",
+        accountIds: [a.otherAccountId, a.otherAccountId],
+      },
+    );
+
+    // El id repetido no duplica la fila: se deduplica antes de escribir.
+    expect(budget.accounts.map((account) => account.id)).toEqual([
+      a.otherAccountId,
+    ]);
+  });
+
+  it("sin cuentas el presupuesto alcanza todas", async () => {
+    const budget = await createBudget(
+      forSpace(a.spaceId),
+      a.spaceId,
+      "EUR",
+      TIMEZONE,
+      { name: "Global", period: "MONTHLY", amountMinor: "50000" },
+    );
+
+    expect(budget.accounts).toEqual([]);
   });
 
   it("rechaza una categoría de otro Space con 404", async () => {
@@ -198,6 +251,17 @@ describe("creación", () => {
         period: "MONTHLY",
         amountMinor: "50000",
         categoryId: b.parentCategoryId,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("rechaza una cuenta de otro Space con 404", async () => {
+    await expect(
+      createBudget(forSpace(a.spaceId), a.spaceId, "EUR", TIMEZONE, {
+        name: "Ajeno",
+        period: "MONTHLY",
+        amountMinor: "50000",
+        accountIds: [b.accountId],
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
@@ -306,6 +370,66 @@ describe("cálculo del gasto", () => {
     expect(budget.spent.amountMinor).toBe("13000");
   });
 
+  it("un presupuesto acotado a cuentas ignora el gasto de las demás", async () => {
+    const today = todayInFixture();
+    await spend(a, 10_000n, today, a.parentCategoryId);
+    await spend(a, 25_000n, today, a.parentCategoryId, {
+      accountId: a.otherAccountId,
+    });
+
+    const budget = await createBudget(
+      forSpace(a.spaceId),
+      a.spaceId,
+      "EUR",
+      TIMEZONE,
+      { ...monthly(a.parentCategoryId), accountIds: [a.otherAccountId] },
+    );
+
+    // Solo los 250 de la tarjeta. Los 100 de la otra cuenta no son de este
+    // presupuesto, aunque sean de la misma categoría.
+    expect(budget.spent.amountMinor).toBe("25000");
+  });
+
+  it("el filtro de cuentas se aplica JUNTO con el de categoría", async () => {
+    const today = todayInFixture();
+    // Misma cuenta, categorías distintas.
+    await spend(a, 10_000n, today, a.parentCategoryId, {
+      accountId: a.otherAccountId,
+    });
+    await spend(a, 70_000n, today, a.otherCategoryId, {
+      accountId: a.otherAccountId,
+    });
+
+    const budget = await createBudget(
+      forSpace(a.spaceId),
+      a.spaceId,
+      "EUR",
+      TIMEZONE,
+      { ...monthly(a.parentCategoryId), accountIds: [a.otherAccountId] },
+    );
+
+    expect(budget.spent.amountMinor).toBe("10000");
+  });
+
+  it("varias cuentas suman entre sí", async () => {
+    const today = todayInFixture();
+    await spend(a, 10_000n, today, null);
+    await spend(a, 25_000n, today, null, { accountId: a.otherAccountId });
+
+    const budget = await createBudget(
+      forSpace(a.spaceId),
+      a.spaceId,
+      "EUR",
+      TIMEZONE,
+      {
+        ...monthly(null, "200000"),
+        accountIds: [a.accountId, a.otherAccountId],
+      },
+    );
+
+    expect(budget.spent.amountMinor).toBe("35000");
+  });
+
   it("no cuenta gastos fuera del período en curso", async () => {
     const db = forSpace(a.spaceId);
     await spend(a, 20_000n, "2026-01-15", a.parentCategoryId);
@@ -351,6 +475,79 @@ describe("estados y alertas", () => {
     const budget = await make("50000", 62_000n);
     expect(budget.state).toBe("OVER");
     expect(budget.remaining.amountMinor).toBe("-12000");
+  });
+});
+
+describe("edición del alcance por cuentas", () => {
+  it("REEMPLAZA la lista entera, no la suma", async () => {
+    const db = forSpace(a.spaceId);
+    const budget = await createBudget(db, a.spaceId, "EUR", TIMEZONE, {
+      name: "Comida",
+      period: "MONTHLY",
+      amountMinor: "50000",
+      accountIds: [a.accountId],
+    });
+
+    const updated = await updateBudget(db, TIMEZONE, budget.id, {
+      accountIds: [a.otherAccountId],
+    });
+
+    expect(updated.accounts.map((account) => account.id)).toEqual([
+      a.otherAccountId,
+    ]);
+  });
+
+  it("una lista vacía lo devuelve a todas las cuentas", async () => {
+    const db = forSpace(a.spaceId);
+    const today = todayInFixture();
+    await spend(a, 10_000n, today, null);
+    await spend(a, 25_000n, today, null, { accountId: a.otherAccountId });
+
+    const budget = await createBudget(db, a.spaceId, "EUR", TIMEZONE, {
+      name: "Comida",
+      period: "MONTHLY",
+      amountMinor: "200000",
+      accountIds: [a.accountId],
+    });
+    expect(budget.spent.amountMinor).toBe("10000");
+
+    const updated = await updateBudget(db, TIMEZONE, budget.id, {
+      accountIds: [],
+    });
+
+    expect(updated.accounts).toEqual([]);
+    expect(updated.spent.amountMinor).toBe("35000");
+  });
+
+  it("no tocar accountIds deja el alcance como estaba", async () => {
+    const db = forSpace(a.spaceId);
+    const budget = await createBudget(db, a.spaceId, "EUR", TIMEZONE, {
+      name: "Comida",
+      period: "MONTHLY",
+      amountMinor: "50000",
+      accountIds: [a.accountId],
+    });
+
+    const updated = await updateBudget(db, TIMEZONE, budget.id, {
+      name: "Comida y bebida",
+    });
+
+    expect(updated.accounts.map((account) => account.id)).toEqual([
+      a.accountId,
+    ]);
+  });
+
+  it("rechaza una cuenta de otro Space con 404", async () => {
+    const db = forSpace(a.spaceId);
+    const budget = await createBudget(db, a.spaceId, "EUR", TIMEZONE, {
+      name: "Comida",
+      period: "MONTHLY",
+      amountMinor: "50000",
+    });
+
+    await expect(
+      updateBudget(db, TIMEZONE, budget.id, { accountIds: [b.accountId] }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 

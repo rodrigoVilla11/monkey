@@ -30,6 +30,13 @@ const base = z.object({
    * Con categoría, el tope incluye también sus subcategorías.
    */
   categoryId: cuidSchema.nullable().optional(),
+  /**
+   * Cuentas que alcanza el tope. Lista vacía (o ausente) = todas las cuentas.
+   *
+   * Es lo que permite dos presupuestos sobre la misma categoría con topes
+   * distintos según de dónde salga la plata.
+   */
+  accountIds: z.array(cuidSchema).max(50).optional(),
   amountMinor: amountMinorSchema.refine(
     (v) => BigInt(v) > 0n,
     "El monto tiene que ser mayor a cero",
@@ -94,6 +101,13 @@ export interface BudgetDTO {
     readonly color: string | null;
     readonly icon: string | null;
   } | null;
+  /** Vacío = el presupuesto cuenta el gasto de todas las cuentas. */
+  readonly accounts: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly color: string | null;
+    readonly icon: string | null;
+  }[];
 }
 
 /** Presupuesto con su estado calculado para el período en curso. */

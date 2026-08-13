@@ -23,6 +23,7 @@ export const SPACE_SCOPED_MODELS = [
   "Tag",
   "TransactionTag",
   "Budget",
+  "BudgetAccount",
   "RecurringRule",
   "SavingsGoal",
   "SavingsContribution",

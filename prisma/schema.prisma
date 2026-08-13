@@ -226,6 +226,7 @@ model Space {
   tags            Tag[]
   transactionTags TransactionTag[]
   budgets         Budget[]
+  budgetAccounts  BudgetAccount[]
   recurringRules  RecurringRule[]
   savingsGoals    SavingsGoal[]
   savingsContribs SavingsContribution[]
@@ -410,6 +411,7 @@ model Account {
   recurringRules RecurringRule[]
   savingsGoals   SavingsGoal[]
   debts          Debt[]
+  budgetScopes   BudgetAccount[]
 
   /// Destino de las claves foráneas compuestas del Space. Ver la nota de
   /// "integridad referencial dentro del Space" al pie del archivo.
@@ -425,19 +427,19 @@ model Category {
   /// hijas. Se valida en el service, el esquema no lo puede expresar.
   parentId String?
 
-  name      String
-  kind      CategoryKind
-  icon      String?
-  color     String?
-  sortOrder Int          @default(0)
+  name       String
+  kind       CategoryKind
+  icon       String?
+  color      String?
+  sortOrder  Int          @default(0)
   /// Viene del catálogo por defecto que se siembra al crear el Space.
-  isSystem  Boolean      @default(false)
+  isSystem   Boolean      @default(false)
   /// Archivada: no se ofrece al cargar, pero el historial queda intacto.
   ///
   /// Es lo que distingue "ya no uso esta categoría" de "esta categoría fue un
   /// error": borrarla reasigna o deja sin categoría los movimientos que la
   /// usaban, y eso reescribe el pasado. Archivar no toca ni una fila.
-  isArchived Boolean @default(false)
+  isArchived Boolean      @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -652,11 +654,40 @@ model Budget {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  space    Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  category Category? @relation(fields: [spaceId, categoryId], references: [spaceId, id], onDelete: Cascade)
+  space    Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  category Category?       @relation(fields: [spaceId, categoryId], references: [spaceId, id], onDelete: Cascade)
+  accounts BudgetAccount[]
 
+  /// Destino de las claves foráneas compuestas del Space. Ver la nota de
+  /// "integridad referencial dentro del Space" al pie del archivo.
+  @@unique([spaceId, id])
   @@index([spaceId, isActive, deletedAt])
   @@index([spaceId, categoryId])
+}
+
+/// Cuentas que alcanza un presupuesto.
+///
+/// SIN filas = el presupuesto cuenta el gasto de TODAS las cuentas. Es la
+/// ausencia de restricción, no una lista vacía: así los presupuestos que ya
+/// existían siguen significando lo mismo después de la migración.
+///
+/// Con filas, el tope solo mira lo pagado con esas cuentas. Es lo que permite
+/// "500 de comida con las tarjetas" y "200 de comida en efectivo" a la vez.
+model BudgetAccount {
+  budgetId  String
+  accountId String
+  /// Denormalizado a propósito: mantiene el invariante "toda tabla de dominio
+  /// tiene spaceId", así la extensión de scope no necesita excepciones.
+  spaceId   String
+
+  createdAt DateTime @default(now())
+
+  budget  Budget  @relation(fields: [spaceId, budgetId], references: [spaceId, id], onDelete: Cascade)
+  account Account @relation(fields: [spaceId, accountId], references: [spaceId, id], onDelete: Cascade)
+  space   Space   @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  @@id([budgetId, accountId])
+  @@index([spaceId, accountId])
 }
 
 model RecurringRule {

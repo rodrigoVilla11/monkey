@@ -20,8 +20,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api-client";
-import { toMinor } from "@/lib/format";
-import { useCategories } from "@/lib/hooks/use-domain";
+import { minorToInput, toMinor } from "@/lib/format";
+import { useAccounts, useCategories } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,7 @@ export default function BudgetsPage() {
   const { space } = useActiveSpace();
   const spaceId = space?.id ?? "";
   const [showNew, setShowNew] = useState(false);
+  const [editing, setEditing] = useState<BudgetWithStatus | null>(null);
 
   const budgets = useQuery({
     queryKey: [...spaceScopeKey(spaceId), "budgets"],
@@ -80,27 +81,52 @@ export default function BudgetsPage() {
           <PiggyBank className="size-10 opacity-40" />
           <p className="text-sm">Todavía no hay presupuestos</p>
           <p className="max-w-xs text-xs">
-            Poné un tope a una categoría y te avisamos cuando te estés
-            acercando.
+            Poné un tope a una categoría o a unas cuentas y te avisamos cuando
+            te estés acercando.
           </p>
         </div>
       ) : (
         <div className="space-y-3">
           {budgets.data.map((budget) => (
             <Card key={budget.id} className="p-4">
-              <BudgetBar budget={budget} locale={locale} />
+              <BudgetBar
+                budget={budget}
+                locale={locale}
+                onSelect={
+                  canEdit
+                    ? () => {
+                        setEditing(budget);
+                      }
+                    : undefined
+                }
+              />
               {canEdit && <DeleteButton spaceId={spaceId} budget={budget} />}
             </Card>
           ))}
         </div>
       )}
 
-      <NewBudgetSheet
+      <BudgetSheet
         open={showNew}
         onOpenChange={setShowNew}
         spaceId={spaceId}
         currency={space?.primaryCurrency ?? "EUR"}
       />
+
+      {/* Montado por presupuesto: el `key` reinicia el formulario al cambiar de
+          uno a otro, sin tener que sincronizar cada campo a mano. */}
+      {editing !== null && (
+        <BudgetSheet
+          key={editing.id}
+          open
+          onOpenChange={(value) => {
+            if (!value) setEditing(null);
+          }}
+          spaceId={spaceId}
+          currency={space?.primaryCurrency ?? "EUR"}
+          budget={editing}
+        />
+      )}
     </div>
   );
 }
@@ -136,52 +162,97 @@ function DeleteButton({
   );
 }
 
-function NewBudgetSheet({
+/**
+ * Alta y edición en el mismo formulario: son exactamente los mismos campos, y
+ * tener dos copias garantizaba que una se quedara atrás al agregar uno nuevo
+ * —que es justo lo que pasó con el alcance por cuentas—.
+ */
+function BudgetSheet({
   open,
   onOpenChange,
   spaceId,
   currency,
+  budget,
 }: {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   spaceId: string;
   currency: string;
+  budget?: BudgetWithStatus;
 }) {
   const queryClient = useQueryClient();
   const categories = useCategories(spaceId, "EXPENSE");
-
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState("");
-  const [period, setPeriod] = useState<BudgetPeriod>("MONTHLY");
-  const [categoryId, setCategoryId] = useState<string | null>(null);
-  const [rollover, setRollover] = useState(false);
-  const [endDate, setEndDate] = useState("");
-
+  // Se piden también las archivadas para poder FILTRARLAS abajo: una archivada
+  // que ya está en el presupuesto tiene que seguir viéndose, o quedaría
+  // seleccionada sin chip y no habría forma de sacarla.
+  const accounts = useAccounts(spaceId, true);
   const exponent = getCurrencyExponent(currency);
+  const isEdit = budget !== undefined;
 
-  const create = useMutation({
-    mutationFn: () =>
-      api.post(`/spaces/${spaceId}/budgets`, {
+  const [name, setName] = useState(budget?.name ?? "");
+  const [amount, setAmount] = useState(
+    budget === undefined
+      ? ""
+      : minorToInput(budget.amount.amountMinor, exponent),
+  );
+  const [period, setPeriod] = useState<BudgetPeriod>(
+    budget?.period ?? "MONTHLY",
+  );
+  const [categoryId, setCategoryId] = useState<string | null>(
+    budget?.category?.id ?? null,
+  );
+  const [accountIds, setAccountIds] = useState<string[]>(
+    budget === undefined ? [] : budget.accounts.map((account) => account.id),
+  );
+  const [rollover, setRollover] = useState(budget?.rollover ?? false);
+  const [endDate, setEndDate] = useState(budget?.endDate ?? "");
+
+  const toggleAccount = (accountId: string): void => {
+    setAccountIds((current) =>
+      current.includes(accountId)
+        ? current.filter((id) => id !== accountId)
+        : [...current, accountId],
+    );
+  };
+
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
         name,
         // El input pide unidades mayores; se convierte a mínimas acá, con
         // enteros y sin pasar por parseFloat.
         amountMinor: toMinor(amount, exponent),
         period,
         categoryId,
+        accountIds,
         rollover,
-        ...(period === "CUSTOM" && endDate !== "" ? { endDate } : {}),
-      }),
+        // Se manda null y no se omite: al pasar de período fijo a mensual hay
+        // que BORRAR la fecha de fin, no dejar la vieja puesta.
+        endDate: period === "CUSTOM" && endDate !== "" ? endDate : null,
+      };
+
+      return isEdit
+        ? api.patch(`/spaces/${spaceId}/budgets/${budget.id}`, body)
+        : api.post(`/spaces/${spaceId}/budgets`, body);
+    },
     onSuccess: async () => {
-      toast.success("Presupuesto creado");
-      setName("");
-      setAmount("");
-      setCategoryId(null);
+      toast.success(isEdit ? "Presupuesto actualizado" : "Presupuesto creado");
+      // El formulario de alta queda montado entre aperturas —el de edición se
+      // remonta con su `key`—, así que se limpia a mano para que el próximo
+      // "Nuevo" no arranque con los datos del anterior.
+      if (!isEdit) {
+        setName("");
+        setAmount("");
+        setCategoryId(null);
+        setAccountIds([]);
+        setEndDate("");
+      }
       onOpenChange(false);
       await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
     },
     onError: (error: unknown) => {
       toast.error(
-        error instanceof ApiError ? error.message : "No se pudo crear",
+        error instanceof ApiError ? error.message : "No se pudo guardar",
       );
     },
   });
@@ -191,13 +262,15 @@ function NewBudgetSheet({
     /^\d+([.,]\d+)?$/.test(amount) &&
     Number(amount.replace(",", ".")) > 0 &&
     (period !== "CUSTOM" || endDate !== "") &&
-    !create.isPending;
+    !save.isPending;
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="max-h-[90dvh] pb-safe-bottom">
         <DrawerHeader className="text-left">
-          <DrawerTitle>Nuevo presupuesto</DrawerTitle>
+          <DrawerTitle>
+            {isEdit ? "Editar presupuesto" : "Nuevo presupuesto"}
+          </DrawerTitle>
         </DrawerHeader>
 
         <DrawerBody className="space-y-4">
@@ -232,21 +305,15 @@ function NewBudgetSheet({
             <Label>Período</Label>
             <div className="flex flex-wrap gap-2">
               {BUDGET_PERIODS.map((option) => (
-                <button
+                <Chip
                   key={option}
-                  type="button"
+                  active={period === option}
                   onClick={() => {
                     setPeriod(option);
                   }}
-                  aria-pressed={period === option}
-                  className={cn(
-                    "min-h-touch rounded-full border px-3 text-sm",
-                    period === option &&
-                      "border-primary bg-primary text-primary-foreground",
-                  )}
                 >
                   {BUDGET_PERIOD_LABELS[option]}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
@@ -269,40 +336,63 @@ function NewBudgetSheet({
           <div className="space-y-2">
             <Label>Categoría</Label>
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
+              <Chip
+                active={categoryId === null}
                 onClick={() => {
                   setCategoryId(null);
                 }}
-                aria-pressed={categoryId === null}
-                className={cn(
-                  "min-h-touch rounded-full border px-3 text-sm",
-                  categoryId === null &&
-                    "border-primary bg-primary text-primary-foreground",
-                )}
               >
                 Todos los gastos
-              </button>
+              </Chip>
               {(categories.data ?? []).map((category) => (
-                <button
+                <Chip
                   key={category.id}
-                  type="button"
+                  active={categoryId === category.id}
                   onClick={() => {
                     setCategoryId(category.id);
                   }}
-                  aria-pressed={categoryId === category.id}
-                  className={cn(
-                    "min-h-touch rounded-full border px-3 text-sm",
-                    categoryId === category.id &&
-                      "border-primary bg-primary text-primary-foreground",
-                  )}
                 >
                   {category.name}
-                </button>
+                </Chip>
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
               Un presupuesto de categoría incluye también sus subcategorías.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Cuentas</Label>
+            <div className="flex flex-wrap gap-2">
+              <Chip
+                active={accountIds.length === 0}
+                onClick={() => {
+                  setAccountIds([]);
+                }}
+              >
+                Todas
+              </Chip>
+              {(accounts.data ?? [])
+                .filter(
+                  (account) =>
+                    !account.isArchived || accountIds.includes(account.id),
+                )
+                .map((account) => (
+                  <Chip
+                    key={account.id}
+                    active={accountIds.includes(account.id)}
+                    onClick={() => {
+                      toggleAccount(account.id);
+                    }}
+                  >
+                    {account.name}
+                  </Chip>
+                ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {accountIds.length === 0
+                ? "Cuenta el gasto de todas las cuentas. Elegí algunas para hacer un tope aparte —por ejemplo, uno para las tarjetas y otro para el efectivo—."
+                : "Solo cuenta el gasto pagado con las cuentas elegidas."}
             </p>
           </div>
 
@@ -324,11 +414,13 @@ function NewBudgetSheet({
             className="min-h-touch w-full"
             disabled={!canSave}
             onClick={() => {
-              create.mutate();
+              save.mutate();
             }}
           >
-            {create.isPending ? (
+            {save.isPending ? (
               <Loader2 className="size-4 animate-spin" />
+            ) : isEdit ? (
+              "Guardar cambios"
             ) : (
               "Crear presupuesto"
             )}
@@ -336,5 +428,29 @@ function NewBudgetSheet({
         </DrawerBody>
       </DrawerContent>
     </Drawer>
+  );
+}
+
+function Chip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "min-h-touch rounded-full border px-3 text-sm",
+        active && "border-primary bg-primary text-primary-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }

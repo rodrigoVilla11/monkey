@@ -36,6 +36,12 @@ import {
  *    crear. El gasto se suma sobre `amountPrimaryMinor` cuando el movimiento
  *    está en otra moneda, así que comparar contra un tope en una tercera
  *    moneda no significaría nada.
+ *
+ * 3. **Un presupuesto sin cuentas alcanza todas las cuentas.** La lista vacía
+ *    es la ausencia de restricción, no "ninguna cuenta": un tope que no
+ *    contara nada no sería un tope. Los dos filtros —categoría y cuentas— se
+ *    aplican JUNTOS, así que "comida con las tarjetas" es un presupuesto y
+ *    "comida en efectivo" es otro.
  */
 
 const SELECT = {
@@ -50,6 +56,14 @@ const SELECT = {
   endDate: true,
   categoryId: true,
   category: { select: { id: true, name: true, color: true, icon: true } },
+  accounts: {
+    select: {
+      account: { select: { id: true, name: true, color: true, icon: true } },
+    },
+    // El mismo orden que la pantalla de cuentas: la lista de chips de un
+    // presupuesto no puede reordenarse sola entre recargas.
+    orderBy: { account: { sortOrder: "asc" } },
+  },
 } as const;
 
 const money = (amountMinor: bigint, currency: string): MoneyDTO => ({
@@ -88,6 +102,7 @@ const categoryScope = async (
 const spendFor = async (
   db: ScopedDb,
   categoryIds: string[] | null,
+  accountIds: readonly string[],
   from: CalendarDate,
   periodStart: CalendarDate,
   periodEnd: CalendarDate,
@@ -95,6 +110,8 @@ const spendFor = async (
   const scope = {
     type: "EXPENSE" as const,
     ...(categoryIds !== null ? { categoryId: { in: categoryIds } } : {}),
+    // Sin cuentas elegidas no se filtra: el presupuesto mira todo el Space.
+    ...(accountIds.length > 0 ? { accountId: { in: [...accountIds] } } : {}),
   };
 
   // `sumInPrimary` convierte correctamente cuando el Space tiene varias
@@ -136,6 +153,14 @@ interface BudgetRow {
     color: string | null;
     icon: string | null;
   } | null;
+  accounts: {
+    account: {
+      id: string;
+      name: string;
+      color: string | null;
+      icon: string | null;
+    };
+  }[];
 }
 
 const withStatus = async (
@@ -151,9 +176,11 @@ const withStatus = async (
   const elapsed = elapsedPeriods(kind, startDate, today);
 
   const categoryIds = await categoryScope(db, row.categoryId);
+  const accounts = row.accounts.map((link) => link.account);
   const spend = await spendFor(
     db,
     categoryIds,
+    accounts.map((account) => account.id),
     startDate,
     period.start,
     period.end,
@@ -176,6 +203,7 @@ const withStatus = async (
     startDate,
     endDate,
     category: row.category,
+    accounts,
     periodStart: period.start,
     periodEnd: period.end,
     nextPeriodStart: nextPeriodStart(kind, period),
@@ -279,6 +307,33 @@ const validateCategory = async (
   }
 };
 
+/**
+ * Las cuentas tienen que existir y ser del Space. Se comprueba contra el
+ * cliente scopeado, así que una cuenta ajena simplemente no aparece y cae en
+ * el mismo 404 que una inexistente: no hay forma de sondear ids de otro Space.
+ *
+ * Devuelve la lista sin repetidos: la PK de BudgetAccount rechazaría el
+ * duplicado con un error de base, que no dice nada útil.
+ */
+const validateAccounts = async (
+  db: ScopedDb,
+  accountIds: readonly string[],
+): Promise<string[]> => {
+  const unique = [...new Set(accountIds)];
+  if (unique.length === 0) return [];
+
+  const found = await db.account.findMany({
+    where: { id: { in: unique } },
+    select: { id: true },
+  });
+
+  if (found.length !== unique.length) {
+    throw errors.notFound("Alguna de las cuentas no existe");
+  }
+
+  return unique;
+};
+
 export const createBudget = async (
   db: ScopedDb,
   spaceId: string,
@@ -286,22 +341,15 @@ export const createBudget = async (
   viewerTimezone: string,
   input: CreateBudgetRequest,
 ): Promise<BudgetWithStatus> => {
-  if (input.categoryId != null) {
-    await validateCategory(db, input.categoryId);
+  if (input.categoryId != null) await validateCategory(db, input.categoryId);
 
-    // Un segundo presupuesto activo sobre la misma categoría daría dos topes
-    // simultáneos y dos alertas contradictorias.
-    const existing = await db.budget.findFirst({
-      where: { categoryId: input.categoryId, isActive: true },
-      select: { id: true },
-    });
-    if (existing !== null) {
-      throw errors.conflict(
-        "CONFLICT",
-        "Esa categoría ya tiene un presupuesto activo",
-      );
-    }
-  }
+  // Se permiten varios presupuestos sobre la misma categoría a propósito: es
+  // justamente lo que hace útil el alcance por cuentas —"comida con las
+  // tarjetas" y "comida en efectivo" son dos topes distintos sobre la misma
+  // categoría—. Distinguir "solapado" de "válido" exigiría comparar conjuntos
+  // de cuentas en cada alta, y el caso ambiguo lo resuelve mejor quien lo
+  // creó que una regla nuestra.
+  const accountIds = await validateAccounts(db, input.accountIds ?? []);
 
   const startDate = input.startDate ?? todayIn(viewerTimezone);
 
@@ -310,6 +358,9 @@ export const createBudget = async (
       spaceId,
       name: input.name,
       categoryId: input.categoryId ?? null,
+      // Sin `spaceId`: es parte de la FK compuesta hacia el propio Budget, así
+      // que Prisma lo hereda de la fila padre y rechaza que se lo pasen.
+      accounts: { create: accountIds.map((accountId) => ({ accountId })) },
       period: input.period,
       amountMinor: BigInt(input.amountMinor),
       // Siempre la primaria del Space: ver la nota de arriba.
@@ -338,6 +389,11 @@ export const updateBudget = async (
   if (existing === null) throw errors.notFound("No se encontró el presupuesto");
 
   if (input.categoryId != null) await validateCategory(db, input.categoryId);
+
+  const accountIds =
+    input.accountIds === undefined
+      ? null
+      : await validateAccounts(db, input.accountIds);
 
   // El CHECK de la base exige fecha de fin en los CUSTOM; se comprueba acá
   // contra el estado resultante para dar un mensaje entendible.
@@ -376,6 +432,18 @@ export const updateBudget = async (
         ? {
             endDate:
               input.endDate === null ? null : fromCalendarDate(input.endDate),
+          }
+        : {}),
+      // El alcance por cuentas se REEMPLAZA entero, no se va sumando: mandar
+      // la lista es decir "el presupuesto es exactamente estas cuentas", y una
+      // lista vacía lo devuelve a "todas". Va anidado para que el borrado y el
+      // alta ocurran en la misma sentencia y no quede un instante sin cuentas.
+      ...(accountIds !== null
+        ? {
+            accounts: {
+              deleteMany: {},
+              create: accountIds.map((accountId) => ({ accountId })),
+            },
           }
         : {}),
     },
