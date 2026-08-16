@@ -73,7 +73,7 @@ export interface MaterializeOptions {
    * cron corriera 24 veces para cubrirlos todos.
    */
   readonly until?: CalendarDate;
-  /** Acota el barrido a un Space. Lo usa el disparo manual desde la app. */
+  /** Acota el barrido a un Space. Lo usa el barrido oportunista del dashboard. */
   readonly spaceId?: string;
   readonly logger?: Logger;
 }
