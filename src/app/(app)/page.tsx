@@ -2,22 +2,32 @@
 
 import dynamic from "next/dynamic";
 import {
+  Check,
   ChevronRight,
+  CircleDashed,
   PiggyBank,
   Target,
   TrendingDown,
   TrendingUp,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatMoneyDTO } from "@/lib/format";
-import { useDashboard } from "@/lib/hooks/use-domain";
+import { formatMoneyDTO, formatSignedAmount } from "@/lib/format";
+import {
+  useDashboard,
+  useDeleteTransaction,
+  useUpdateTransaction,
+} from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { cn } from "@/lib/utils";
+import type { PendingSummary } from "@/shared/contracts/reports";
 import { formatCalendarDate } from "@/shared/dates";
+import { hasAtLeast } from "@/shared/roles";
 
 /**
  * Recharts pesa más de 100 kB y solo hace falta en esta pantalla.
@@ -141,6 +151,20 @@ export default function DashboardPage() {
           </p>
         </div>
       </Card>
+
+      {/**
+       * Movimientos programados que nacieron pendientes de revisar. Es la
+       * bandeja de entrada del inicio: se aceptan o descartan acá mismo, sin
+       * pasar por Movimientos. Solo aparece si hay algo que revisar.
+       */}
+      {dashboard.data.pendingTransactions.count > 0 && (
+        <PendingCard
+          pending={dashboard.data.pendingTransactions}
+          spaceId={spaceId}
+          locale={locale}
+          canEdit={space !== undefined && hasAtLeast(space.role, "MEMBER")}
+        />
+      )}
 
       {/**
        * Metas con plan. Es un recordatorio, no un informe: dice lo que toca
@@ -322,5 +346,133 @@ export default function DashboardPage() {
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * Tarjeta de movimientos por confirmar.
+ *
+ * Confirmar es un PATCH a CLEARED; descartar borra el movimiento — la
+ * ocurrencia programada que al final no pasó (la suscripción que no se cobró)
+ * no tiene por qué quedar ensuciando los saldos. Sin permiso de escritura la
+ * tarjeta igual se muestra, pero sin acciones: un VIEWER puede enterarse, no
+ * decidir.
+ */
+function PendingCard({
+  pending,
+  spaceId,
+  locale,
+  canEdit,
+}: {
+  pending: PendingSummary;
+  spaceId: string;
+  locale: string;
+  canEdit: boolean;
+}) {
+  const update = useUpdateTransaction(spaceId);
+  const remove = useDeleteTransaction(spaceId);
+  const busy = update.isPending || remove.isPending;
+
+  const confirm = (id: string) => {
+    update.mutate(
+      { id, status: "CLEARED" },
+      {
+        onSuccess: () => {
+          toast.success("Movimiento confirmado");
+        },
+      },
+    );
+  };
+
+  const discard = (id: string) => {
+    remove.mutate(id, {
+      onSuccess: () => {
+        toast.success("Movimiento descartado");
+      },
+    });
+  };
+
+  return (
+    <Card className="gap-2 p-4">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-sm font-semibold">
+          <CircleDashed className="size-4" />
+          Por confirmar
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {pending.count}
+        </span>
+      </div>
+
+      <div className="divide-y">
+        {pending.items.map((item) => (
+          <div key={item.id} className="flex items-center gap-2 py-1.5">
+            <span
+              className="size-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: item.categoryColor ?? "var(--muted)" }}
+              aria-hidden
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium">
+                {item.description ?? item.categoryName ?? "Sin descripción"}
+              </span>
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {formatCalendarDate(item.date, locale, {
+                  day: "numeric",
+                  month: "short",
+                })}
+                {" · "}
+                {item.accountName}
+              </span>
+            </span>
+            <span
+              className={cn(
+                "shrink-0 text-xs font-semibold tabular-nums",
+                item.type === "INCOME" && "text-income",
+              )}
+            >
+              {formatSignedAmount(item.amount, item.type, locale)}
+            </span>
+
+            {canEdit && (
+              <span className="flex shrink-0 items-center">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    confirm(item.id);
+                  }}
+                  aria-label="Confirmar movimiento"
+                  className="flex min-h-touch min-w-touch items-center justify-center text-income disabled:opacity-40"
+                >
+                  <Check className="size-4.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    discard(item.id);
+                  }}
+                  aria-label="Descartar movimiento"
+                  className="flex min-h-touch min-w-touch items-center justify-center text-muted-foreground disabled:opacity-40"
+                >
+                  <X className="size-4.5" />
+                </button>
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {pending.count > pending.items.length && (
+        <Link
+          href="/transactions"
+          className="flex items-center gap-0.5 text-xs text-muted-foreground"
+        >
+          y {pending.count - pending.items.length} más en Movimientos
+          <ChevronRight className="size-3.5" />
+        </Link>
+      )}
+    </Card>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { Check, Search, SlidersHorizontal, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { AttachmentsPanel } from "@/components/transactions/attachments-panel";
 import { SplitPanel } from "@/components/transactions/split-panel";
@@ -21,6 +22,7 @@ import {
   useCategories,
   useMembers,
   useTransactions,
+  useUpdateTransaction,
 } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { useDebounced } from "@/lib/hooks/use-debounced";
@@ -177,6 +179,23 @@ export default function TransactionsPage() {
               ))}
             </FilterGroup>
 
+            <FilterGroup label="Estado">
+              {(["PENDING", "CLEARED"] as const).map((status) => (
+                <Chip
+                  key={status}
+                  active={filters.status === status}
+                  onClick={() => {
+                    setFilters((prev) => ({
+                      ...prev,
+                      status: prev.status === status ? undefined : status,
+                    }));
+                  }}
+                >
+                  {status === "PENDING" ? "Pendientes" : "Confirmados"}
+                </Chip>
+              ))}
+            </FilterGroup>
+
             <FilterGroup label="Cuenta">
               {(accounts.data ?? []).map((account) => (
                 <Chip
@@ -310,6 +329,8 @@ function TransactionDetail({
   isShared: boolean;
   onClose: () => void;
 }) {
+  const update = useUpdateTransaction(spaceId);
+
   return (
     <Drawer
       open={transaction !== null}
@@ -361,7 +382,36 @@ function TransactionDetail({
               {transaction.notes !== null && (
                 <Detail label="Notas" value={transaction.notes} />
               )}
+              {/* Solo se dice cuando hay algo que hacer: "confirmado" es el
+                  estado normal de todo movimiento y decirlo sería ruido. */}
+              {transaction.status === "PENDING" && (
+                <Detail label="Estado" value="Pendiente de confirmar" />
+              )}
             </dl>
+
+            {transaction.status === "PENDING" && canEdit && (
+              <Button
+                className="w-full"
+                disabled={update.isPending}
+                onClick={() => {
+                  update.mutate(
+                    { id: transaction.id, status: "CLEARED" },
+                    {
+                      onSuccess: () => {
+                        toast.success("Movimiento confirmado");
+                        // El drawer muestra la copia que le pasó la lista; se
+                        // cierra para no dejar en pantalla un "pendiente" que
+                        // ya no es cierto mientras refetchea.
+                        onClose();
+                      },
+                    },
+                  );
+                }}
+              >
+                <Check className="size-4" />
+                {update.isPending ? "Confirmando…" : "Confirmar movimiento"}
+              </Button>
+            )}
 
             {/* Solo en Spaces compartidos: repartir un gasto con uno mismo no
                 significa nada. */}

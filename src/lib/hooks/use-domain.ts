@@ -22,6 +22,7 @@ import type {
   TagDTO,
   TransactionDTO,
   TransactionFilters,
+  UpdateTransactionRequest,
 } from "@/shared/contracts/transactions";
 import type {
   CreateTransferRequest,
@@ -130,6 +131,19 @@ export const useCreateTransaction = (spaceId: string) => {
     mutationFn: (input: CreateTransactionRequest) =>
       api.post<{ transaction: TransactionDTO }>(
         `/spaces/${spaceId}/transactions`,
+        input,
+      ),
+    onSuccess: invalidate,
+  });
+};
+
+export const useUpdateTransaction = (spaceId: string) => {
+  const invalidate = useInvalidateSpace(spaceId);
+
+  return useMutation({
+    mutationFn: ({ id, ...input }: UpdateTransactionRequest & { id: string }) =>
+      api.patch<{ transaction: TransactionDTO }>(
+        `/spaces/${spaceId}/transactions/${id}`,
         input,
       ),
     onSuccess: invalidate,

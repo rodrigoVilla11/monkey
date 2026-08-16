@@ -73,6 +73,31 @@ export interface MonthSummary {
   readonly transactionCount: number;
 }
 
+/**
+ * Movimiento pendiente de confirmar, resumido para la tarjeta del inicio.
+ *
+ * Nacen así las ocurrencias de reglas programadas sin auto-confirmar (y las
+ * filas importadas como "Pendiente"). No es un TransactionDTO completo: la
+ * tarjeta solo necesita reconocerlo y actuar, el detalle vive en Movimientos.
+ */
+export interface PendingTransactionItem {
+  readonly id: string;
+  readonly type: "INCOME" | "EXPENSE";
+  readonly amount: MoneyDTO;
+  readonly date: string;
+  readonly description: string | null;
+  readonly categoryName: string | null;
+  readonly categoryColor: string | null;
+  readonly accountName: string;
+}
+
+export interface PendingSummary {
+  /** Total de pendientes del Space, no solo los listados. */
+  readonly count: number;
+  /** Los más antiguos primero, hasta un tope; `count` dice si hay más. */
+  readonly items: readonly PendingTransactionItem[];
+}
+
 export interface MemberBreakdownItem {
   readonly userId: string | null;
   readonly name: string;
@@ -97,4 +122,6 @@ export interface DashboardResponse {
    * hay ninguna: el inicio no muestra una sección que no tiene nada que decir.
    */
   readonly goalReminders: readonly GoalReminder[];
+  /** Movimientos por confirmar. `count: 0` si no hay ninguno. */
+  readonly pendingTransactions: PendingSummary;
 }

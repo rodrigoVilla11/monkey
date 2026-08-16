@@ -14,11 +14,13 @@ import type {
   MemberBreakdownItem,
   MonthSummary,
   NetWorth,
+  PendingSummary,
 } from "@/shared/contracts/reports";
 import {
   addMonths,
   fromCalendarDate,
   monthRange,
+  toCalendarDate,
   todayIn,
   type CalendarDate,
   type DateRange,
@@ -254,6 +256,57 @@ const byMember = async (
     );
 };
 
+/**
+ * Movimientos por confirmar: los que nacieron PENDING (reglas programadas sin
+ * auto-confirmar, importaciones marcadas como pendientes).
+ *
+ * Se listan los más antiguos primero —lo que lleva más tiempo sin revisar es
+ * lo primero que hay que mirar— y `count` trae el total real para que la
+ * tarjeta pueda decir "y N más" sin traerlos todos.
+ */
+const PENDING_ITEMS_LIMIT = 5;
+
+const pendingTransactions = async (db: ScopedDb): Promise<PendingSummary> => {
+  // Sin transferencias: se crean CLEARED y además no se editan por pata.
+  const where = {
+    status: "PENDING" as const,
+    type: { in: ["INCOME", "EXPENSE"] as ("INCOME" | "EXPENSE")[] },
+  };
+
+  const [count, rows] = await Promise.all([
+    db.transaction.count({ where }),
+    db.transaction.findMany({
+      where,
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      take: PENDING_ITEMS_LIMIT,
+      select: {
+        id: true,
+        type: true,
+        amountMinor: true,
+        currency: true,
+        date: true,
+        description: true,
+        account: { select: { name: true } },
+        category: { select: { name: true, color: true } },
+      },
+    }),
+  ]);
+
+  return {
+    count,
+    items: rows.map((row) => ({
+      id: row.id,
+      type: row.type as "INCOME" | "EXPENSE",
+      amount: dto(row.amountMinor, row.currency),
+      date: toCalendarDate(row.date),
+      description: row.description,
+      categoryName: row.category?.name ?? null,
+      categoryColor: row.category?.color ?? null,
+      accountName: row.account.name,
+    })),
+  };
+};
+
 export const getDashboard = async (
   db: ScopedDb,
   space: { readonly primaryCurrency: string; readonly timezone: string },
@@ -275,6 +328,7 @@ export const getDashboard = async (
     members,
     budgets,
     reminders,
+    pending,
   ] = await Promise.all([
     summarize(db, current, space.primaryCurrency),
     summarize(db, previous, space.primaryCurrency),
@@ -284,6 +338,7 @@ export const getDashboard = async (
     byMember(db, current, space.primaryCurrency),
     budgetSummary(db, viewerTimezone, space.primaryCurrency),
     goalReminders(db, viewerTimezone),
+    pendingTransactions(db),
   ]);
 
   return {
@@ -296,6 +351,7 @@ export const getDashboard = async (
     byMember: members,
     budgets,
     goalReminders: reminders,
+    pendingTransactions: pending,
   };
 };
 
