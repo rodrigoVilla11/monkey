@@ -75,6 +75,14 @@ export interface MaterializeOptions {
   readonly until?: CalendarDate;
   /** Acota el barrido a un Space. Lo usa el barrido oportunista del dashboard. */
   readonly spaceId?: string;
+  /** Acota el barrido a UNA regla. Lo usa el "Aceptar" manual de Programados. */
+  readonly ruleId?: string;
+  /**
+   * Fuerza que las ocurrencias nazcan CLEARED aunque la regla no tenga
+   * `autoPost`. Es para el "Aceptar" explícito: quien tocó el botón ya revisó,
+   * y hacerlas nacer pendientes lo obligaría a confirmar lo mismo dos veces.
+   */
+  readonly post?: boolean;
   readonly logger?: Logger;
 }
 
@@ -156,6 +164,7 @@ export const materializeDueRules = async (
         deletedAt: null,
         nextRunDate: { lte: fromCalendarDate(until) },
         ...(options.spaceId !== undefined ? { spaceId: options.spaceId } : {}),
+        ...(options.ruleId !== undefined ? { id: options.ruleId } : {}),
         ...(cursor !== undefined ? { id: { gt: cursor } } : {}),
       },
       orderBy: { id: "asc" },
@@ -170,7 +179,7 @@ export const materializeDueRules = async (
       rulesExamined += 1;
 
       try {
-        const result = await materializeRule(rule, until);
+        const result = await materializeRule(rule, until, options.post);
 
         transactionsCreated += result.created;
         if (result.created > 0) rulesAdvanced += 1;
@@ -231,6 +240,7 @@ interface RuleResult {
 const materializeRule = async (
   rule: RuleRow,
   until: CalendarDate,
+  post?: boolean,
 ): Promise<RuleResult> => {
   const spec = specOf(rule);
   const window = occurrencesUpTo(
@@ -277,8 +287,10 @@ const materializeRule = async (
         createdByName: rule.createdByName,
         recurringRuleId: rule.id,
         type: rule.type as "INCOME" | "EXPENSE",
-        // `autoPost` decide si nace dada por buena o a revisar.
-        status: rule.autoPost ? ("CLEARED" as const) : ("PENDING" as const),
+        // `autoPost` decide si nace dada por buena o a revisar, salvo que el
+        // disparo venga de un "Aceptar" explícito (`post`).
+        status:
+          (post ?? rule.autoPost) ? ("CLEARED" as const) : ("PENDING" as const),
         amountMinor: rule.amountMinor,
         currency: rule.currency,
         date: fromCalendarDate(date),

@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock,
+  Check,
   Loader2,
   Pause,
   Play,
@@ -248,6 +249,7 @@ export default function RecurringPage() {
               spaceId={spaceId}
               locale={locale}
               canEdit={canEdit}
+              today={todayIn(timezone)}
             />
           ))}
         </div>
@@ -267,11 +269,13 @@ function RuleCard({
   spaceId,
   locale,
   canEdit,
+  today,
 }: {
   rule: RecurringRuleDTO;
   spaceId: string;
   locale: string;
   canEdit: boolean;
+  today: string;
 }) {
   const queryClient = useQueryClient();
   const invalidate = async (): Promise<void> => {
@@ -293,6 +297,33 @@ function RuleCard({
       await invalidate();
     },
   });
+
+  const accept = useMutation({
+    mutationFn: () =>
+      api.post<{ created: number }>(
+        `/spaces/${spaceId}/recurring/${rule.id}/materialize`,
+      ),
+    onSuccess: async (data) => {
+      // `created: 0` puede pasar si el cron o el barrido del inicio se
+      // adelantaron entre que se pintó el botón y el toque. No es un error.
+      toast.success(
+        data.created === 0
+          ? "Ya estaba generado"
+          : data.created === 1
+            ? "Movimiento aceptado"
+            : `${String(data.created)} movimientos aceptados`,
+      );
+      await invalidate();
+    },
+  });
+
+  /**
+   * "Aceptar" solo aparece cuando la regla ya venció: el día que dice (o
+   * antes, si quedó atrasada). Aceptar antes de fecha registraría plata que
+   * todavía no se movió.
+   */
+  const isDue =
+    rule.isActive && rule.nextRunDate !== null && rule.nextRunDate <= today;
 
   const color = rule.category?.color ?? "#71717a";
 
@@ -340,8 +371,14 @@ function RuleCard({
           </span>
         ) : (
           <>
-            <span className="text-muted-foreground">Próximo: </span>
-            <span className="font-medium">
+            <span className="text-muted-foreground">
+              {!isDue
+                ? "Próximo: "
+                : rule.nextRunDate === today
+                  ? "Vence hoy: "
+                  : "Venció: "}
+            </span>
+            <span className={cn("font-medium", isDue && "text-expense")}>
               {formatCalendarDate(rule.nextRunDate, locale, {
                 dateStyle: "medium",
               })}
@@ -380,6 +417,24 @@ function RuleCard({
 
       {canEdit && (
         <div className="mt-2 flex gap-4">
+          {isDue && (
+            <button
+              type="button"
+              disabled={accept.isPending}
+              onClick={() => {
+                accept.mutate();
+              }}
+              className="flex min-h-touch items-center gap-1.5 text-xs font-medium text-primary disabled:opacity-40"
+            >
+              {accept.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Check className="size-3.5" />
+              )}
+              Aceptar
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {

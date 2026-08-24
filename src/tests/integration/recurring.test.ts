@@ -371,6 +371,40 @@ describe("autoPost", () => {
   });
 });
 
+describe("aceptar manual (ruleId + post)", () => {
+  it("acotado a ruleId, las otras reglas del Space no se tocan", async () => {
+    const space = await makeSpace();
+    const target = await addRule(space, { autoPost: false });
+    await addRule(space, { description: "Seguro", byMonthDay: 15 });
+
+    const report = await materializeDueRules({
+      until: "2026-02-20",
+      spaceId: space.spaceId,
+      ruleId: target,
+    });
+
+    // Solo el alquiler (1 ene y 1 feb); el seguro sigue sin materializar.
+    expect(report.rulesExamined).toBe(1);
+    expect(report.transactionsCreated).toBe(2);
+  });
+
+  it("con post, nacen CLEARED aunque la regla no tenga autoPost", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space, { autoPost: false });
+
+    await materializeDueRules({
+      until: "2026-01-31",
+      spaceId: space.spaceId,
+      ruleId,
+      post: true,
+    });
+
+    expect(await materialized(space.spaceId)).toEqual([
+      { date: "2026-01-01", status: "CLEARED", amountMinor: 95_000n },
+    ]);
+  });
+});
+
 describe("multi-moneda", () => {
   it("congela la cotización de CADA fecha, no la de hoy", async () => {
     const space = await makeSpace("EUR");

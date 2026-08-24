@@ -520,6 +520,13 @@ export const ROUTES: readonly RouteSpec[] = [
     minRole: "MEMBER",
   },
   {
+    method: "POST",
+    path: "/api/v1/spaces/[spaceId]/recurring/[ruleId]/materialize",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "Acepta ya las ocurrencias vencidas de la regla; nacen confirmadas",
+  },
+  {
     method: "DELETE",
     path: "/api/v1/spaces/[spaceId]/recurring/[ruleId]",
     auth: "verified",
