@@ -1,6 +1,7 @@
 "use client";
 
 import * as Icons from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -43,6 +44,7 @@ import { SUGGESTED_CURRENCIES, getCurrencyExponent } from "@/shared/currency";
 import { hasAtLeast } from "@/shared/roles";
 
 export default function AccountsPage() {
+  const router = useRouter();
   const session = useSession();
   const { space } = useActiveSpace();
   const spaceId = space?.id ?? "";
@@ -63,21 +65,41 @@ export default function AccountsPage() {
   const canEdit = space !== undefined && hasAtLeast(space.role, "MEMBER");
   const canDelete = space !== undefined && hasAtLeast(space.role, "ADMIN");
 
+  // Mover plata necesita dos puntas: con una sola cuenta no hay adónde.
+  const activeCount =
+    accounts.data?.filter((account) => !account.isArchived).length ?? 0;
+  const canTransfer = canEdit && activeCount >= 2;
+
   return (
     <div className="space-y-4 py-3">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Cuentas</h1>
         {canEdit && (
-          <Button
-            size="sm"
-            className="min-h-touch"
-            onClick={() => {
-              setShowNew(true);
-            }}
-          >
-            <Icons.Plus className="size-4" />
-            Nueva
-          </Button>
+          <div className="flex items-center gap-2">
+            {canTransfer && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="min-h-touch"
+                onClick={() => {
+                  router.push("/transactions/transfer");
+                }}
+              >
+                <Icons.ArrowLeftRight className="size-4" />
+                Transferir
+              </Button>
+            )}
+            <Button
+              size="sm"
+              className="min-h-touch"
+              onClick={() => {
+                setShowNew(true);
+              }}
+            >
+              <Icons.Plus className="size-4" />
+              Nueva
+            </Button>
+          </div>
         )}
       </div>
 
@@ -131,6 +153,7 @@ export default function AccountsPage() {
           spaceId={spaceId}
           account={editing}
           canDelete={canDelete}
+          canTransfer={canTransfer && !editing.isArchived}
         />
       )}
     </div>
@@ -626,13 +649,16 @@ function EditAccountSheet({
   spaceId,
   account,
   canDelete,
+  canTransfer,
 }: {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   spaceId: string;
   account: AccountWithBalance;
   canDelete: boolean;
+  canTransfer: boolean;
 }) {
+  const router = useRouter();
   const exponent = getCurrencyExponent(account.currency);
 
   const [name, setName] = useState(account.name);
@@ -760,6 +786,21 @@ function EditAccountSheet({
               "Guardar cambios"
             )}
           </Button>
+
+          {/* Atajo, no edición: quien abre una cuenta pensando "mover plata
+              de acá" no debería tener que ir a buscarlo a otra pantalla. */}
+          {canTransfer && (
+            <Button
+              variant="outline"
+              className="min-h-touch w-full"
+              onClick={() => {
+                router.push(`/transactions/transfer?from=${account.id}`);
+              }}
+            >
+              <Icons.ArrowLeftRight className="size-4" />
+              Transferir desde esta cuenta
+            </Button>
+          )}
 
           <div className="space-y-3 border-t pt-4">
             <Button

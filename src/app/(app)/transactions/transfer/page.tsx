@@ -1,8 +1,8 @@
 "use client";
 
 import { ArrowDown, Loader2, X } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { toast } from "sonner";
 
 import { AmountPad } from "@/components/transactions/amount-pad";
@@ -31,13 +31,19 @@ import { deriveRate, money } from "@/shared/money";
  * incluida— en vez de calcularlo con una cotización que nunca es la que aplicó
  * el banco.
  */
-export default function TransferPage() {
+function TransferForm() {
   const router = useRouter();
   const session = useSession();
   const { space } = useActiveSpace();
   const spaceId = space?.id ?? "";
 
-  const [fromId, setFromId] = useState<string | null>(null);
+  /**
+   * Desde Cuentas se llega con `?from=<accountId>` para que la cuenta desde la
+   * que se quiere mover plata ya venga elegida. Si el id no existe o está
+   * archivado, el fallback de abajo elige la principal como siempre.
+   */
+  const search = useSearchParams();
+  const [fromId, setFromId] = useState<string | null>(search.get("from"));
   const [toId, setToId] = useState<string | null>(null);
   const [digitsOut, setDigitsOut] = useState("");
   const [digitsIn, setDigitsIn] = useState("");
@@ -242,6 +248,18 @@ export default function TransferPage() {
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * `useSearchParams` exige un límite de Suspense para el prerender estático;
+ * sin él, el build de Next falla en esta ruta.
+ */
+export default function TransferPage() {
+  return (
+    <Suspense>
+      <TransferForm />
+    </Suspense>
   );
 }
 
