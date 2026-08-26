@@ -48,7 +48,7 @@ export const viewport: Viewport = {
   // El zoom al enfocar inputs lo resuelve la regla de 16px en globals.css.
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d1117" },
   ],
 };
 

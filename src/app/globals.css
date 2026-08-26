@@ -4,7 +4,11 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Tokens de color (shadcn / base zinc).
+   Tokens de color, derivados del logo (public/logo):
+     · azul brillante #2691e2 → oklch(0.638 0.153 247)  — anillo del logo
+     · azul oscuro    #2475b2 → oklch(0.544 0.122 246)  — trazos del mono
+     · naranja        #ec9a33 → oklch(0.752 0.148 67)   — llave, ojo y $
+   Los neutros llevan un tinte azul sutil (hue ~250) para empalmar con ellos.
    Dark mode: la clase `.dark` la pone next-themes, con defaultTheme="dark"
    y enableSystem — o sea, gana prefers-color-scheme y si no hay preferencia,
    queda oscuro.
@@ -18,24 +22,26 @@
   --keyboard-inset: 0px;
 
   --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.16 0.02 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.16 0.02 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.16 0.02 255);
+  /* El azul oscuro del logo, no el brillante: es el que aguanta texto blanco
+     encima con contraste AA. El brillante queda para focos y acentos. */
+  --primary: oklch(0.544 0.122 246);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.962 0.012 240);
+  --secondary-foreground: oklch(0.3 0.05 248);
+  --muted: oklch(0.962 0.012 240);
+  --muted-foreground: oklch(0.54 0.03 252);
+  --accent: oklch(0.945 0.023 240);
+  --accent-foreground: oklch(0.3 0.05 248);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
+  --border: oklch(0.915 0.012 245);
+  --input: oklch(0.915 0.012 245);
+  --ring: oklch(0.638 0.153 247);
 
   /* Semántica financiera: ingreso vs egreso. No se usa rojo/verde a secas
      porque el rojo ya es `destructive` (acciones peligrosas). */
@@ -44,50 +50,55 @@
   --expense: oklch(0.62 0.2 25);
   --expense-foreground: oklch(0.985 0 0);
 
-  /* Ámbar de marca: el mismo del ícono (#f59e0b), un tono más oscuro sobre
-     fondo claro para que el texto siga siendo legible. */
-  --brand: oklch(0.666 0.179 58.318);
+  /* Azul de marca: el del logo. Sobre fondo claro va el azul oscuro de los
+     trazos (#2475b2), que es legible como texto; el anillo brillante vibra. */
+  --brand: oklch(0.544 0.122 246);
 
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --chart-1: oklch(0.638 0.153 247);
+  --chart-2: oklch(0.752 0.148 67);
+  --chart-3: oklch(0.544 0.122 246);
+  --chart-4: oklch(0.72 0.11 210);
+  --chart-5: oklch(0.62 0.13 50);
 }
 
 .dark {
-  --background: oklch(0.141 0.005 285.823);
+  /* #0d1117: el mismo hex del manifest y del themeColor oscuro, para que el
+     splash, la barra del sistema y el fondo de la app sean UN color. */
+  --background: oklch(0.176 0.014 258);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
+  --card: oklch(0.22 0.018 256);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
+  --popover: oklch(0.22 0.018 256);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
+  /* Azul aclarado del anillo: el #2691e2 puro no llega a AA con texto blanco,
+     así que en oscuro el botón es celeste con texto azul noche. */
+  --primary: oklch(0.74 0.1 246);
+  --primary-foreground: oklch(0.17 0.03 250);
+  --secondary: oklch(0.27 0.02 255);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
+  --muted: oklch(0.27 0.02 255);
+  --muted-foreground: oklch(0.71 0.02 250);
+  --accent: oklch(0.31 0.04 248);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 18%);
-  --ring: oklch(0.552 0.016 285.938);
+  --ring: oklch(0.638 0.153 247);
 
   --income: oklch(0.72 0.17 156);
-  --income-foreground: oklch(0.141 0.005 285.823);
+  --income-foreground: oklch(0.176 0.014 258);
   --expense: oklch(0.7 0.19 25);
-  --expense-foreground: oklch(0.141 0.005 285.823);
+  --expense-foreground: oklch(0.176 0.014 258);
 
-  --brand: oklch(0.769 0.188 70.08);
+  /* Sobre oscuro sí entra el azul brillante del anillo, tal cual (#2691e2). */
+  --brand: oklch(0.638 0.153 247);
 
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --chart-1: oklch(0.68 0.14 247);
+  --chart-2: oklch(0.78 0.14 70);
+  --chart-3: oklch(0.544 0.122 246);
+  --chart-4: oklch(0.72 0.11 210);
+  --chart-5: oklch(0.62 0.13 50);
 }
 
 @theme inline {

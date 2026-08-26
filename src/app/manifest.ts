@@ -18,8 +18,8 @@ export default function manifest(): MetadataRoute.Manifest {
     /** Sin barra de navegador: es lo que la hace sentir una app. */
     display: "standalone",
     orientation: "portrait",
-    background_color: "#09090b",
-    theme_color: "#09090b",
+    background_color: "#0d1117",
+    theme_color: "#0d1117",
     lang: "es",
     dir: "ltr",
     categories: ["finance", "productivity"],

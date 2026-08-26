@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
+import { BrandLockup } from "@/components/brand/logo";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { SpaceSwitcher } from "@/components/layout/space-switcher";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 
 /**
@@ -39,7 +39,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }, [session.isError, session.data?.emailVerified, router]);
 
   if (isLoading || session.data === undefined) {
-    return <AppSkeleton />;
+    return <AppLoading />;
   }
 
   return (
@@ -68,13 +68,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   );
 }
 
-function AppSkeleton() {
+/**
+ * Pantalla de carga del arranque: la MISMA marca que la splash del sistema
+ * (logo sobre disco blanco, nombre y eslogan), así el pasaje splash → app no
+ * salta de un logo a cajas grises. El pulso es la única señal de "cargando":
+ * a esta altura no hay layout que valga la pena esqueletar, todavía no se
+ * sabe ni a qué pantalla se entra.
+ */
+function AppLoading() {
   return (
-    <div className="mx-auto max-w-lg space-y-4 p-4 pt-20">
-      <Skeleton className="h-8 w-40" />
-      <Skeleton className="h-28 w-full rounded-xl" />
-      <Skeleton className="h-20 w-full rounded-xl" />
-      <Skeleton className="h-20 w-full rounded-xl" />
+    <div className="flex h-dvh items-center justify-center">
+      <BrandLockup className="animate-pulse" />
     </div>
   );
 }
