@@ -11,6 +11,7 @@ import type {
   SavingsGoalDTO,
   SavingsGoalFilters,
   SavingsSummary,
+  UpdateContributionRequest,
   UpdateSavingsGoalRequest,
 } from "@/shared/contracts/savings";
 import {
@@ -604,6 +605,53 @@ const resolveAmount = async (
     "UNPROCESSABLE",
     `El movimiento está en ${transaction.currency} y la meta en ${goalCurrency}: cargá el aporte con el importe que quieras sumar`,
   );
+};
+
+export const updateContribution = async (
+  db: ScopedDb,
+  tx: TransactionClient,
+  spaceId: string,
+  goalId: string,
+  contributionId: string,
+  input: UpdateContributionRequest,
+): Promise<void> => {
+  const existing = await db.savingsContribution.findFirst({
+    where: { id: contributionId, goalId },
+    select: { id: true, transactionId: true },
+  });
+  if (existing === null) throw errors.notFound("No se encontró el aporte");
+
+  /**
+   * Vinculado a un movimiento, importe y fecha salen de él —la razón de
+   * vincular es que no puedan discrepar— así que acá solo se edita la nota.
+   * Para corregir el resto: editar el movimiento, o quitar el aporte y
+   * cargarlo suelto.
+   */
+  if (
+    existing.transactionId !== null &&
+    (input.amountMinor !== undefined || input.date !== undefined)
+  ) {
+    throw errors.conflict(
+      "CONFLICT",
+      "El importe y la fecha de este aporte salen del movimiento vinculado: editá el movimiento, o quitá el aporte y cargalo suelto",
+    );
+  }
+
+  await tx.savingsContribution.update({
+    where: { id: contributionId },
+    data: {
+      ...(input.amountMinor !== undefined
+        ? { amountMinor: BigInt(input.amountMinor) }
+        : {}),
+      ...(input.date !== undefined
+        ? { date: fromCalendarDate(input.date) }
+        : {}),
+      ...(input.note !== undefined ? { note: input.note } : {}),
+    },
+  });
+
+  // Bajar un aporte puede desmarcar una meta lograda, y al revés.
+  await refreshAchieved(tx, spaceId, goalId);
 };
 
 export const removeContribution = async (

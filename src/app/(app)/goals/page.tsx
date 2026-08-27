@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Target, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, Target, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -29,8 +29,10 @@ import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import type {
+  ContributionDTO,
   SavingsGoalDTO,
   SavingsGoalDetail,
+  UpdateContributionRequest,
 } from "@/shared/contracts/savings";
 import { getCurrencyExponent } from "@/shared/currency";
 import { formatCalendarDate, todayIn } from "@/shared/dates";
@@ -517,6 +519,7 @@ function ContributionsList({
 }) {
   const queryClient = useQueryClient();
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
 
   const detail = useQuery({
     queryKey: [...spaceScopeKey(spaceId), "goals", "detail", goal.id],
@@ -525,6 +528,30 @@ function ContributionsList({
         `/spaces/${spaceId}/goals/${goal.id}`,
       ),
     select: (data) => data.goal.contributions,
+  });
+
+  const update = useMutation({
+    mutationFn: ({
+      contributionId,
+      input,
+    }: {
+      contributionId: string;
+      input: UpdateContributionRequest;
+    }) =>
+      api.patch(
+        `/spaces/${spaceId}/goals/${goal.id}/contributions/${contributionId}`,
+        input,
+      ),
+    onSuccess: async () => {
+      toast.success("Aporte actualizado");
+      setEditId(null);
+      await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof ApiError ? error.message : "No se pudo guardar",
+      );
+    },
   });
 
   const remove = useMutation({
@@ -561,6 +588,25 @@ function ContributionsList({
     <ul className="space-y-1.5">
       {detail.data.map((item) => {
         const isWithdrawal = item.amount.amountMinor.startsWith("-");
+
+        if (editId === item.id) {
+          return (
+            <li key={item.id} className="rounded-lg border px-3 py-2">
+              <ContributionEditForm
+                item={item}
+                currency={goal.target.currency}
+                busy={update.isPending}
+                onSave={(input) => {
+                  update.mutate({ contributionId: item.id, input });
+                }}
+                onCancel={() => {
+                  setEditId(null);
+                }}
+              />
+            </li>
+          );
+        }
+
         return (
           <li key={item.id} className="rounded-lg border px-3 py-2">
             <div className="flex items-center justify-between gap-3">
@@ -589,16 +635,29 @@ function ContributionsList({
               </div>
 
               {canEdit && confirmId !== item.id && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setConfirmId(item.id);
-                  }}
-                  aria-label={`Quitar el aporte de ${formatMoneyDTO(item.amount, locale)}`}
-                  className="min-h-touch shrink-0 px-1 text-muted-foreground"
-                >
-                  <Trash2 className="size-4" />
-                </button>
+                <div className="flex shrink-0 items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmId(null);
+                      setEditId(item.id);
+                    }}
+                    aria-label={`Editar el aporte de ${formatMoneyDTO(item.amount, locale)}`}
+                    className="min-h-touch px-1.5 text-muted-foreground"
+                  >
+                    <Pencil className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmId(item.id);
+                    }}
+                    aria-label={`Quitar el aporte de ${formatMoneyDTO(item.amount, locale)}`}
+                    className="min-h-touch px-1.5 text-muted-foreground"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
               )}
             </div>
 
@@ -642,6 +701,129 @@ function ContributionsList({
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * Corregir un aporte en su propia fila.
+ *
+ * Suelto se edita todo; vinculado a un movimiento, solo la nota — el importe
+ * y la fecha salen del movimiento y el servidor rechaza tocarlos, así que los
+ * campos ni se ofrecen. El importe admite signo: un retiro mal cargado se
+ * corrige acá mismo.
+ */
+function ContributionEditForm({
+  item,
+  currency,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  item: ContributionDTO;
+  currency: string;
+  busy: boolean;
+  onSave: (input: UpdateContributionRequest) => void;
+  onCancel: () => void;
+}) {
+  const exponent = getCurrencyExponent(currency);
+  const linked = item.transaction !== null;
+
+  const [amount, setAmount] = useState(
+    minorToInput(item.amount.amountMinor, exponent),
+  );
+  const [date, setDate] = useState(item.date);
+  const [note, setNote] = useState(item.note ?? "");
+
+  const canSave =
+    !busy &&
+    (linked ||
+      (isAmountInput(amount) &&
+        toMinor(amount, exponent) !== "0" &&
+        date !== ""));
+
+  const submit = (): void => {
+    const trimmed = note.trim();
+    onSave(
+      linked
+        ? { note: trimmed === "" ? null : trimmed }
+        : {
+            amountMinor: toMinor(amount, exponent),
+            date,
+            note: trimmed === "" ? null : trimmed,
+          },
+    );
+  };
+
+  return (
+    <div className="space-y-2">
+      {linked ? (
+        <p className="text-xs text-muted-foreground">
+          El importe y la fecha salen del movimiento vinculado; acá solo se
+          edita la nota.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor={`edit-contribution-amount-${item.id}`}>
+              Importe ({currency})
+            </Label>
+            <Input
+              id={`edit-contribution-amount-${item.id}`}
+              value={amount}
+              onChange={(e) => {
+                setAmount(e.target.value);
+              }}
+              inputMode="decimal"
+              className="min-h-touch"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`edit-contribution-date-${item.id}`}>Fecha</Label>
+            <Input
+              id={`edit-contribution-date-${item.id}`}
+              type="date"
+              value={date}
+              onChange={(e) => {
+                setDate(e.target.value);
+              }}
+              className="min-h-touch"
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1">
+        <Label htmlFor={`edit-contribution-note-${item.id}`}>Nota</Label>
+        <Input
+          id={`edit-contribution-note-${item.id}`}
+          value={note}
+          onChange={(e) => {
+            setNote(e.target.value);
+          }}
+          placeholder="Opcional"
+          className="min-h-touch"
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          className="min-h-touch flex-1"
+          disabled={!canSave}
+          onClick={submit}
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : "Guardar"}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-h-touch flex-1"
+          onClick={onCancel}
+        >
+          Cancelar
+        </Button>
+      </div>
+    </div>
   );
 }
 

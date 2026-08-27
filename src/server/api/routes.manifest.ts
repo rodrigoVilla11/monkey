@@ -574,6 +574,13 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "Nunca crea un movimiento: ahorrar no es gastar",
   },
   {
+    method: "PATCH",
+    path: "/api/v1/spaces/[spaceId]/goals/[goalId]/contributions/[contributionId]",
+    auth: "verified",
+    minRole: "MEMBER",
+    note: "En aportes vinculados a un movimiento solo se edita la nota",
+  },
+  {
     method: "DELETE",
     path: "/api/v1/spaces/[spaceId]/goals/[goalId]/contributions/[contributionId]",
     auth: "verified",

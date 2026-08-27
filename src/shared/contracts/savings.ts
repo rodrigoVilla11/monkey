@@ -125,6 +125,29 @@ export const createContributionRequestSchema = z
     "Un aporte de cero no aporta nada",
   );
 
+/**
+ * Editar un aporte: lo que se escribió a mano al cargarlo.
+ *
+ * En un aporte vinculado a un movimiento el importe y la fecha salen del
+ * movimiento —la razón de vincular es que no puedan discrepar— así que ahí lo
+ * único editable es la nota; el servidor rechaza lo demás.
+ */
+export const updateContributionRequestSchema = z
+  .object({
+    amountMinor: signedAmountMinorSchema.optional(),
+    date: calendarDateSchema.optional(),
+    note: z.string().trim().max(200).nullable().optional(),
+  })
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "Hay que mandar al menos un campo",
+  )
+  .refine(
+    (value) =>
+      value.amountMinor === undefined || BigInt(value.amountMinor) !== 0n,
+    "Un aporte de cero no aporta nada",
+  );
+
 export type CreateSavingsGoalRequest = z.infer<
   typeof createSavingsGoalRequestSchema
 >;
@@ -133,6 +156,9 @@ export type UpdateSavingsGoalRequest = z.infer<
 >;
 export type CreateContributionRequest = z.infer<
   typeof createContributionRequestSchema
+>;
+export type UpdateContributionRequest = z.infer<
+  typeof updateContributionRequestSchema
 >;
 
 export const savingsGoalFiltersSchema = z.object({

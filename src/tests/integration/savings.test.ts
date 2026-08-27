@@ -13,6 +13,7 @@ import {
   getSavingsGoal,
   listSavingsGoals,
   removeContribution,
+  updateContribution,
   updateSavingsGoal,
 } from "@/server/services/savings";
 
@@ -272,6 +273,48 @@ describe("progreso", () => {
     expect(goal.saved.amountMinor).toBe("50000");
     expect(goal.contributionCount).toBe(1);
   });
+
+  it("editar un aporte recalcula el progreso y lo logrado", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space, { targetAmountMinor: "100000" });
+
+    const id = await contribute(space, goalId, { amountMinor: "100000" });
+
+    const before = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    expect(before.achieved).toBe(true);
+
+    // Corregir el importe para abajo desmarca la meta que estaba lograda.
+    await systemClient().$transaction(async (tx) => {
+      await updateContribution(
+        forSpace(space.spaceId),
+        tx,
+        space.spaceId,
+        goalId,
+        id,
+        {
+          amountMinor: "40000",
+          date: "2026-08-10",
+          note: "era menos",
+        },
+      );
+    });
+
+    const after = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    expect(after.saved.amountMinor).toBe("40000");
+    expect(after.achieved).toBe(false);
+
+    const edited = after.contributions.find((one) => one.id === id);
+    expect(edited?.date).toBe("2026-08-10");
+    expect(edited?.note).toBe("era menos");
+  });
 });
 
 describe("aportes vinculados a un movimiento", () => {
@@ -318,6 +361,50 @@ describe("aportes vinculados a un movimiento", () => {
     expect(goal.saved.amountMinor).toBe("80000");
     expect(goal.contributions[0]?.date).toBe("2026-08-01");
     expect(goal.contributions[0]?.transaction?.accountName).toBe("Ahorro");
+  });
+
+  it("en un aporte vinculado solo se edita la nota", async () => {
+    const space = await makeSpace();
+    const goalId = await addGoal(space);
+    const transactionId = await makeTransfer(space, 80_000n);
+    const id = await contribute(space, goalId, { transactionId });
+
+    // El importe sale del movimiento; escribirlo a mano los haría discrepar.
+    await expect(
+      systemClient().$transaction(async (tx) => {
+        await updateContribution(
+          forSpace(space.spaceId),
+          tx,
+          space.spaceId,
+          goalId,
+          id,
+          {
+            amountMinor: "99999",
+          },
+        );
+      }),
+    ).rejects.toThrow(/salen del movimiento vinculado/);
+
+    await systemClient().$transaction(async (tx) => {
+      await updateContribution(
+        forSpace(space.spaceId),
+        tx,
+        space.spaceId,
+        goalId,
+        id,
+        {
+          note: "transferencia de agosto",
+        },
+      );
+    });
+
+    const goal = await getSavingsGoal(
+      forSpace(space.spaceId),
+      TIMEZONE,
+      goalId,
+    );
+    expect(goal.saved.amountMinor).toBe("80000");
+    expect(goal.contributions[0]?.note).toBe("transferencia de agosto");
   });
 
   it("el mismo movimiento no se puede vincular dos veces", async () => {
