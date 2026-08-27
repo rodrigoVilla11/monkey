@@ -1,10 +1,18 @@
 "use client";
 
-import { Check, Search, SlidersHorizontal, X } from "lucide-react";
+import {
+  Check,
+  Loader2,
+  Pencil,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AttachmentsPanel } from "@/components/transactions/attachments-panel";
+import { CategoryGrid } from "@/components/transactions/category-grid";
 import { SplitPanel } from "@/components/transactions/split-panel";
 import { TransactionList } from "@/components/transactions/transaction-list";
 import { Button } from "@/components/ui/button";
@@ -17,6 +25,8 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ApiError } from "@/lib/api-client";
 import {
   useAccounts,
   useCategories,
@@ -27,7 +37,13 @@ import {
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { useDebounced } from "@/lib/hooks/use-debounced";
 import { cn } from "@/lib/utils";
-import { formatSignedAmount } from "@/lib/format";
+import {
+  formatSignedAmount,
+  isAmountInput,
+  minorToInput,
+  toMinor,
+} from "@/lib/format";
+import { getCurrencyExponent } from "@/shared/currency";
 import { formatCalendarDate } from "@/shared/dates";
 import { hasAtLeast } from "@/shared/roles";
 import type {
@@ -51,6 +67,7 @@ export default function TransactionsPage() {
   const [filters, setFilters] = useState<TransactionFilters>({});
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState<TransactionDTO | null>(null);
+  const [editing, setEditing] = useState<TransactionDTO | null>(null);
 
   // El buscador espera a que se deje de escribir: sin esto, cada tecla dispara
   // un request y la lista parpadea.
@@ -153,7 +170,27 @@ export default function TransactionsPage() {
         onClose={() => {
           setSelected(null);
         }}
+        onEdit={() => {
+          // El detalle se cierra antes de abrir la edición: dos drawers
+          // apilados en un teléfono son una trampa para el gesto de volver.
+          setEditing(selected);
+          setSelected(null);
+        }}
       />
+
+      {/* Con `key` por movimiento: sin eso, editar un segundo movimiento
+          reusaría el formulario del primero con sus datos viejos. */}
+      {editing !== null && (
+        <EditTransactionSheet
+          key={editing.id}
+          open
+          onOpenChange={(value) => {
+            if (!value) setEditing(null);
+          }}
+          spaceId={spaceId}
+          transaction={editing}
+        />
+      )}
 
       <Drawer open={showFilters} onOpenChange={setShowFilters}>
         <DrawerContent className="max-h-[85dvh] pb-safe-bottom">
@@ -321,6 +358,7 @@ function TransactionDetail({
   canEdit,
   isShared,
   onClose,
+  onEdit,
 }: {
   transaction: TransactionDTO | null;
   spaceId: string;
@@ -328,6 +366,7 @@ function TransactionDetail({
   canEdit: boolean;
   isShared: boolean;
   onClose: () => void;
+  onEdit: () => void;
 }) {
   const update = useUpdateTransaction(spaceId);
 
@@ -389,6 +428,26 @@ function TransactionDetail({
               )}
             </dl>
 
+            {/* Las patas de una transferencia no se editan sueltas: cambiarle
+                el importe a una descuadraría la otra. Se dice en vez de
+                esconder el botón y que parezca un olvido. */}
+            {canEdit &&
+              (transaction.transferGroupId === null ? (
+                <Button
+                  variant="outline"
+                  className="min-h-touch w-full"
+                  onClick={onEdit}
+                >
+                  <Pencil className="size-4" />
+                  Editar movimiento
+                </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Esto es una pata de una transferencia y no se edita suelta:
+                  cambiarla descuadraría la otra cuenta.
+                </p>
+              ))}
+
             {transaction.status === "PENDING" && canEdit && (
               <Button
                 className="w-full"
@@ -432,6 +491,230 @@ function TransactionDetail({
             />
           </DrawerBody>
         )}
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+/**
+ * Editar un movimiento.
+ *
+ * Se edita lo que puede haber salido mal al cargarlo: importe, fecha, cuenta,
+ * categoría y los textos. El tipo y la moneda no —cambiarlos invalidaría el
+ * signo y la conversión congelada de algo ya contabilizado—, y las
+ * transferencias no llegan hasta acá (el detalle ni ofrece el botón).
+ *
+ * Manda siempre el formulario completo, no un diff: los campos de texto
+ * vacíos van como `null` para poder BORRAR una descripción o una nota, que es
+ * la mitad de para qué sirve editar.
+ */
+function EditTransactionSheet({
+  open,
+  onOpenChange,
+  spaceId,
+  transaction,
+}: {
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  spaceId: string;
+  transaction: TransactionDTO;
+}) {
+  const kind = transaction.type === "INCOME" ? "INCOME" : "EXPENSE";
+  const accounts = useAccounts(spaceId);
+  const categories = useCategories(spaceId, kind);
+  const update = useUpdateTransaction(spaceId);
+  const exponent = getCurrencyExponent(transaction.amount.currency);
+
+  const [amount, setAmount] = useState(
+    minorToInput(transaction.amount.amountMinor, exponent),
+  );
+  const [date, setDate] = useState(transaction.date);
+  const [description, setDescription] = useState(transaction.description ?? "");
+  const [payee, setPayee] = useState(transaction.payee ?? "");
+  const [notes, setNotes] = useState(transaction.notes ?? "");
+  const [categoryId, setCategoryId] = useState<string | null>(
+    transaction.category?.id ?? null,
+  );
+  const [accountId, setAccountId] = useState(transaction.account.id);
+
+  /**
+   * Solo cuentas de la misma moneda: la moneda del movimiento no se edita, y
+   * moverlo a una cuenta que opera en otra lo dejaría descuadrado ahí.
+   */
+  const active = accounts.data?.filter((a) => !a.isArchived) ?? [];
+  const eligible = active.filter(
+    (a) => a.currency === transaction.amount.currency,
+  );
+
+  const canSave =
+    isAmountInput(amount) &&
+    Number(amount.replace(",", ".")) > 0 &&
+    date !== "" &&
+    !update.isPending;
+
+  const submit = (): void => {
+    update.mutate(
+      {
+        id: transaction.id,
+        accountId,
+        categoryId,
+        amountMinor: toMinor(amount, exponent),
+        date,
+        description: description.trim() === "" ? null : description.trim(),
+        payee: payee.trim() === "" ? null : payee.trim(),
+        notes: notes.trim() === "" ? null : notes.trim(),
+      },
+      {
+        onSuccess: () => {
+          toast.success("Movimiento actualizado");
+          onOpenChange(false);
+        },
+        onError: (error: unknown) => {
+          toast.error(
+            error instanceof ApiError ? error.message : "No se pudo guardar",
+          );
+        },
+      },
+    );
+  };
+
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent className="max-h-[90dvh] pb-safe-bottom">
+        <DrawerHeader className="text-left">
+          <DrawerTitle>
+            Editar {kind === "EXPENSE" ? "gasto" : "ingreso"}
+          </DrawerTitle>
+        </DrawerHeader>
+
+        <DrawerBody className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-tx-amount">
+                Importe ({transaction.amount.currency})
+              </Label>
+              <Input
+                id="edit-tx-amount"
+                value={amount}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                }}
+                inputMode="decimal"
+                className="min-h-touch"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-tx-date">Fecha</Label>
+              <Input
+                id="edit-tx-date"
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                }}
+                className="min-h-touch"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Categoría</Label>
+            {categories.data === undefined ? (
+              <div className="grid grid-cols-4 gap-2">
+                {Array.from({ length: 8 }, (_unused, i) => (
+                  <Skeleton key={i} className="h-20 rounded-xl" />
+                ))}
+              </div>
+            ) : (
+              <CategoryGrid
+                categories={categories.data}
+                selectedId={categoryId}
+                onSelect={(category) => {
+                  setCategoryId(category?.id ?? null);
+                }}
+              />
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Cuenta</Label>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {eligible.map((account) => (
+                <button
+                  key={account.id}
+                  type="button"
+                  onClick={() => {
+                    setAccountId(account.id);
+                  }}
+                  aria-pressed={account.id === accountId}
+                  className={cn(
+                    "min-h-touch shrink-0 rounded-xl border px-3 py-2 text-sm",
+                    account.id === accountId && "ring-2 ring-primary",
+                  )}
+                >
+                  {account.name}
+                </button>
+              ))}
+            </div>
+            {eligible.length < active.length && (
+              <p className="text-xs text-muted-foreground">
+                Solo se muestran cuentas en {transaction.amount.currency}: la
+                moneda de un movimiento ya cargado no se cambia.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-tx-description">Descripción</Label>
+            <Input
+              id="edit-tx-description"
+              value={description}
+              onChange={(e) => {
+                setDescription(e.target.value);
+              }}
+              placeholder="Opcional"
+              className="min-h-touch"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-tx-payee">Beneficiario</Label>
+            <Input
+              id="edit-tx-payee"
+              value={payee}
+              onChange={(e) => {
+                setPayee(e.target.value);
+              }}
+              placeholder="Opcional"
+              className="min-h-touch"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-tx-notes">Notas</Label>
+            <Input
+              id="edit-tx-notes"
+              value={notes}
+              onChange={(e) => {
+                setNotes(e.target.value);
+              }}
+              placeholder="Opcional"
+              className="min-h-touch"
+            />
+          </div>
+
+          <Button
+            className="min-h-touch w-full"
+            disabled={!canSave}
+            onClick={submit}
+          >
+            {update.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              "Guardar cambios"
+            )}
+          </Button>
+        </DrawerBody>
       </DrawerContent>
     </Drawer>
   );

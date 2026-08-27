@@ -28,7 +28,10 @@ import { useAccounts } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
-import type { SavingsGoalDTO } from "@/shared/contracts/savings";
+import type {
+  SavingsGoalDTO,
+  SavingsGoalDetail,
+} from "@/shared/contracts/savings";
 import { getCurrencyExponent } from "@/shared/currency";
 import { formatCalendarDate, todayIn } from "@/shared/dates";
 import { hasAtLeast } from "@/shared/roles";
@@ -176,6 +179,7 @@ function GoalCard({
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState("");
   const [showOptions, setShowOptions] = useState(false);
+  const [showContributions, setShowContributions] = useState(false);
 
   const invalidate = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
@@ -426,6 +430,37 @@ function GoalCard({
         </div>
       )}
 
+      {/**
+       * El historial, plegado por defecto: la tarjeta es para el día a día y
+       * los aportes viejos no cambian ninguna decisión de hoy. Se abre para
+       * dos cosas: repasar qué se cargó y quitar uno cargado por error.
+       */}
+      {goal.contributionCount > 0 && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => {
+              setShowContributions(!showContributions);
+            }}
+            aria-expanded={showContributions}
+            className="min-h-touch text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+          >
+            {showContributions
+              ? "Ocultar aportes"
+              : `Ver aportes (${String(goal.contributionCount)})`}
+          </button>
+
+          {showContributions && (
+            <ContributionsList
+              goal={goal}
+              spaceId={spaceId}
+              locale={locale}
+              canEdit={canEdit}
+            />
+          )}
+        </div>
+      )}
+
       {canEdit && (
         <div className="flex items-center gap-2 border-t pt-3">
           <Input
@@ -455,6 +490,158 @@ function GoalCard({
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * El historial de aportes de una meta.
+ *
+ * Se pide recién al abrirse: la lista de metas no carga los aportes de nadie,
+ * y quien nunca abre el historial no paga ese viaje.
+ *
+ * Quitar está detrás de una confirmación por fila y no de un tacho directo:
+ * es la única acción de la tarjeta que reescribe el pasado. Si el aporte vino
+ * de un movimiento, el movimiento queda intacto —se deshace la anotación, no
+ * la transferencia— y la confirmación lo dice.
+ */
+function ContributionsList({
+  goal,
+  spaceId,
+  locale,
+  canEdit,
+}: {
+  goal: SavingsGoalDTO;
+  spaceId: string;
+  locale: string;
+  canEdit: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const detail = useQuery({
+    queryKey: [...spaceScopeKey(spaceId), "goals", "detail", goal.id],
+    queryFn: () =>
+      api.get<{ goal: SavingsGoalDetail }>(
+        `/spaces/${spaceId}/goals/${goal.id}`,
+      ),
+    select: (data) => data.goal.contributions,
+  });
+
+  const remove = useMutation({
+    mutationFn: (contributionId: string) =>
+      api.delete(
+        `/spaces/${spaceId}/goals/${goal.id}/contributions/${contributionId}`,
+      ),
+    onSuccess: async () => {
+      toast.success("Aporte quitado");
+      setConfirmId(null);
+      await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof ApiError ? error.message : "No se pudo quitar",
+      );
+    },
+  });
+
+  if (detail.data === undefined) {
+    return (
+      <div className="space-y-1.5">
+        {Array.from(
+          { length: Math.min(goal.contributionCount, 3) },
+          (_unused, i) => (
+            <Skeleton key={i} className="h-11 w-full rounded-lg" />
+          ),
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <ul className="space-y-1.5">
+      {detail.data.map((item) => {
+        const isWithdrawal = item.amount.amountMinor.startsWith("-");
+        return (
+          <li key={item.id} className="rounded-lg border px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p
+                  className={cn(
+                    "text-sm font-medium tabular-nums",
+                    isWithdrawal && "text-expense",
+                  )}
+                >
+                  {formatMoneyDTO(item.amount, locale, {
+                    signDisplay: "always",
+                  })}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {formatCalendarDate(item.date, locale, {
+                    dateStyle: "medium",
+                  })}
+                  {item.transaction !== null && (
+                    <> · {item.transaction.accountName}</>
+                  )}
+                  {item.note !== null && item.note !== "" && (
+                    <> · {item.note}</>
+                  )}
+                </p>
+              </div>
+
+              {canEdit && confirmId !== item.id && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmId(item.id);
+                  }}
+                  aria-label={`Quitar el aporte de ${formatMoneyDTO(item.amount, locale)}`}
+                  className="min-h-touch shrink-0 px-1 text-muted-foreground"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              )}
+            </div>
+
+            {confirmId === item.id && (
+              <div className="mt-2 space-y-2 rounded-lg border border-destructive/40 p-3">
+                <p className="text-xs">
+                  Se quita este aporte de «{goal.name}» y la barra vuelve atrás.
+                  {item.transaction !== null &&
+                    " El movimiento vinculado no se toca."}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="min-h-touch flex-1"
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      remove.mutate(item.id);
+                    }}
+                  >
+                    {remove.isPending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      "Sí, quitar"
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-h-touch flex-1"
+                    onClick={() => {
+                      setConfirmId(null);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
