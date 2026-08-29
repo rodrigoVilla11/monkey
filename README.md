@@ -1,488 +1,236 @@
-# 🐒 monKey
+# monKey
 
-Finanzas personales y compartidas. Mobile-first, pensada para instalarse en la
-pantalla de inicio de un iPhone.
+Personal and shared finance tracking for a household. Mobile-first PWA on top of a multi-tenant REST API, self-hosted on a single VPS.
 
-Los datos financieros viven dentro de **Spaces**: un Space puede ser personal o
-compartido entre varias personas (por ejemplo una pareja llevando las cuentas
-del hogar). Todo el dominio financiero cuelga de un `spaceId` y el aislamiento
-entre Spaces se garantiza en la capa de acceso a datos, no en los handlers.
+## Why this exists
 
----
+I wanted one place where two people can record what they spend from shared and individual accounts, see who owes whom without turning every dinner into a debt record, and get monthly numbers that stay correct after the fact. Off-the-shelf apps either don't share, don't handle multiple currencies honestly, or keep the data somewhere I don't control.
 
-## Estado
+Two constraints shaped the design. First, the data of one household must never leak into another, even when the code has bugs — isolation is enforced in the data layer and in the database, not in request handlers. Second, the app is used with EUR and ARS side by side, so every amount is an integer in minor units with its ISO 4217 code next to it, and every conversion is frozen at write time so historical reports never drift.
 
-| Incremento                       | Estado |
-| -------------------------------- | ------ |
-| 1 · Configuración del proyecto   | ✅     |
-| 2 · Esquema Prisma y migraciones | ✅     |
-| 3 · Capa de datos scopeada       | ✅     |
-| 4 · Auth y sesiones              | ✅     |
-| 5 · Spaces y membresías          | ✅     |
-| 6 · Services de dominio y API v1 | ✅     |
-| 7 · UI                           | ✅     |
-| 8 · PWA                          | ✅     |
+It is a project I built for my own use and keep developing. Deployment target is a single VPS with Docker Compose; the image runs migrations before it accepts traffic.
 
-**Fase 1 completa.**
+## Features
 
-| Fase 2 — Análisis y control | Estado |
-| --------------------------- | ------ |
-| 9 · Presupuestos            | ✅     |
-| 10 · Reportes               | ✅     |
-| 11 · Transferencias         | ✅     |
-| 12 · Recurrentes + cron     | ✅     |
+- **Shared Spaces with roles.** A Space is personal or shared. Members are OWNER / ADMIN / MEMBER / VIEWER, invited by email with expiring tokens. Every domain endpoint declares its minimum role.
+- **Accounts, transactions, transfers, budgets.** Multi-currency accounts; income/expense with categories, tags and attachments (receipts as JPEG/PNG/WebP/HEIC/PDF, validated by magic bytes); two-legged transfers that are net-zero by construction; budgets per category, optionally restricted to specific accounts, with rollover.
+- **Expense splitting and settlements.** A split is an annotation on a transaction, not a debt row. Balances between members are aggregated on read and the app suggests the minimal set of payments to settle up.
+- **Recurring rules materialized by a cron job.** Rent on the 1st, salary on the last Friday. Missed occurrences are backfilled with their real dates; the job is idempotent at the database level.
+- **Savings goals and debts.** Goals track contributions (optionally linked to real transfers) and show reserved vs. available balance per account. Debts record what was agreed and what was paid; no amortization guessing.
+- **Reports, CSV import/export, audit log.** Monthly series, category and member breakdowns, month-over-month comparison. CSV import previews with the same code path that writes. Membership changes and destructive actions are audited inside the same transaction as the change.
 
-**Fase 2 completa.**
+## Architecture
 
-| Fase 3 — Lo que falta      | Estado |
-| -------------------------- | ------ |
-| 13 · Metas de ahorro       | ✅     |
-| 14 · Deudas                | ✅     |
-| 15 · Importar/exportar CSV | ✅     |
-| 16 · Adjuntos              | ✅     |
-| 17 · División de gastos    | ✅     |
-
-**Fase 3 completa.**
-
----
-
-## Stack
-
-Next.js 16 (App Router) · TypeScript 6 estricto · PostgreSQL 17 + Prisma 7 ·
-Tailwind CSS 4 + shadcn/ui · Zod 4 · TanStack Query · Vitest · pnpm · Docker.
-
-Autenticación propia (argon2id + JWT con `jose`), no Auth.js — ver
-[Autenticación](#autenticación).
-
-**Requisito arquitectónico:** la API REST de `app/api/v1/**` es la fuente de
-verdad. El frontend web la consume por `fetch` como cualquier otro cliente, así
-que una futura app nativa en Expo puede reutilizar el backend y los tipos de
-`src/shared/**` tal cual.
-
----
-
-## Levantar el proyecto
-
-Necesitás **Node ≥ 24**, **pnpm 11** y **Docker**.
-
-```bash
-# 1. Dependencias
-pnpm install
-
-# 2. Configuración
-cp .env.example .env
-```
-
-Generá un `AUTH_SECRET` y pegalo en el `.env`:
-
-```bash
-openssl rand -base64 48                                  # macOS / Linux / Git Bash
-```
-
-```powershell
-# PowerShell. `Get-Random` NO sirve para esto: no es un generador criptográfico
-# y este secreto firma todos los JWT de la app.
-[Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
-```
-
-```bash
-# 3. Postgres + servidor de mail
-pnpm docker:up
-
-# 4. Migraciones            (disponible desde el incremento 2)
-pnpm db:migrate
-
-# 5. A trabajar
-pnpm dev
-```
-
-| Servicio         | URL                   |
-| ---------------- | --------------------- |
-| App              | http://localhost:3000 |
-| Mailpit (mails)  | http://localhost:8025 |
-| Postgres (dev)   | `localhost:5442`      |
-| Postgres (tests) | `localhost:5443`      |
-
-Los mails de verificación, invitación y reset **no salen a internet** en
-desarrollo: los captura Mailpit y los ves en su interfaz web.
-
----
-
-## Comandos
-
-| Comando                 | Qué hace                                                  |
-| ----------------------- | --------------------------------------------------------- |
-| `pnpm dev`              | Servidor de desarrollo                                    |
-| `pnpm build`            | `prisma generate` + build de producción                   |
-| `pnpm check`            | typecheck + lint + formato + tests (lo que corre en CI)   |
-| `pnpm typecheck`        | `tsc --noEmit`                                            |
-| `pnpm lint`             | ESLint, incluidas las reglas de arquitectura              |
-| `pnpm format`           | Prettier sobre todo el repo                               |
-| `pnpm test`             | Tests unitarios y de arquitectura (sin base de datos)     |
-| `pnpm test:integration` | Tests de integración (necesita `pnpm docker:up`)          |
-| `pnpm db:migrate`       | Crea y aplica una migración en desarrollo                 |
-| `pnpm db:deploy`        | Aplica migraciones ya versionadas (producción)            |
-| `pnpm db:studio`        | Explorador visual de la base                              |
-| `pnpm db:seed`          | Datos de desarrollo: 3 usuarios y un Space compartido     |
-| `pnpm user:create`      | Crea el primer usuario (disponible desde el incremento 4) |
-
-> Nunca se usa `prisma db push`. Todos los cambios de esquema van por
-> migraciones versionadas y commiteadas.
-
----
-
-## Variables de entorno
-
-Se validan con Zod en [`src/env.schema.ts`](src/env.schema.ts) al arrancar el
-server. Si falta algo o está mal, el proceso no levanta y te dice exactamente
-qué. La lista completa y comentada está en [`.env.example`](.env.example).
-
-Las obligatorias sin default:
-
-| Variable       | Para qué                                                     |
-| -------------- | ------------------------------------------------------------ |
-| `DATABASE_URL` | Conexión a PostgreSQL                                        |
-| `AUTH_SECRET`  | Firma de los JWT. Mínimo 32 caracteres                       |
-| `CRON_SECRET`  | Protege el endpoint de recurrentes. Solo obligatoria en prod |
-
-### Configuración regional
-
-No hay ningún país hardcodeado. `DEFAULT_LOCALE`, `DEFAULT_CURRENCY` y
-`DEFAULT_TIMEZONE` son solo el punto de partida que se le propone a un usuario
-nuevo — después cada usuario tiene su locale y su timezone, y cada Space su
-propia moneda primaria.
-
-```bash
-# España
-DEFAULT_LOCALE=es-ES   DEFAULT_CURRENCY=EUR   DEFAULT_TIMEZONE=Europe/Madrid
-
-# Argentina
-DEFAULT_LOCALE=es-AR   DEFAULT_CURRENCY=ARS   DEFAULT_TIMEZONE=America/Argentina/Buenos_Aires
-```
-
----
-
-## Docker
-
-### Desarrollo
-
-`docker-compose.yml` levanta **solo las dependencias** (Postgres, Postgres de
-test, Mailpit). La app corre en el host con `pnpm dev`, que da hot reload
-instantáneo y evita pelear con bind mounts de `node_modules` en Windows.
-
-### Producción
-
-```bash
-# En el VPS
-cp .env.example .env.production      # completar con valores reales
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-El `Dockerfile` es multi-stage (deps → build → runtime) y usa el output
-`standalone` de Next: la imagen final no lleva pnpm ni devDependencies. Corre
-como usuario sin privilegios y aplica `prisma migrate deploy` antes de aceptar
-tráfico.
-
-Postgres no publica puertos al host. Poné un reverse proxy (Caddy, Traefik,
-nginx) delante para el TLS: `APP_URL` tiene que ser `https` porque las cookies
-de sesión van con `Secure`.
-
----
-
-## Arquitectura
+Next.js App Router serves both the REST API (`src/app/api/v1/**`) and the web UI (`src/app/(app)/**`). The UI talks to the API with `fetch` like any other client — no Server Actions, no direct Prisma access from components — so a native client can reuse the backend and the contracts in `src/shared/**` as they are.
 
 ```
 src/
-├── shared/      Tipos y lógica pura. CERO dependencias de Next, React o Prisma:
-│                un cliente Expo tiene que poder importar esto tal cual.
+├── shared/            Contracts (Zod), money, dates, recurrence, split maths.
+│                      Pure TypeScript: no Next, React or Prisma imports (lint + arch test).
 ├── server/
-│   ├── db/      Acceso a datos. Único lugar del código que ve el PrismaClient.
-│   ├── auth/    Hash de passwords, JWT, resolución de sesión (cookie o Bearer).
-│   ├── api/     Wrapper de handlers, errores, autorización, manifiesto de rutas.
-│   └── services/ Lógica de negocio. Funciones puras que reciben dependencias.
+│   ├── db/            The only place that sees PrismaClient. forSpace(spaceId), systemClient(), raw SQL for reports.
+│   ├── auth/          argon2id, JWT (jose), session resolution from cookie or Bearer.
+│   ├── api/           route() wrapper, error mapping, authorization, rate limiting, routes manifest.
+│   ├── services/      Business logic as functions that receive their dependencies.
+│   ├── mail/          console | smtp | resend drivers behind one interface.
+│   └── storage/       Local-disk driver behind one interface (attachments).
 ├── app/
-│   ├── api/v1/  La API. Fuente de verdad para web y nativo.
-│   └── (app)/   UI. Consume la API v1 por fetch, igual que cualquier cliente.
-├── lib/         Cliente web: fetch tipado, TanStack Query, hooks.
+│   ├── api/v1/        Route handlers. One line of glue each: schema + role + service call.
+│   ├── (app)/         Authenticated UI (dashboard, transactions, budgets, goals, debts, reports, settings).
+│   ├── (auth)/        Login, register, verify, reset, invitation acceptance.
+│   └── sw.ts          Service Worker source (built separately by Serwist).
+├── lib/               Typed API client, TanStack Query hooks, SW bridge.
 └── tests/
-    ├── unit/         Lógica de negocio
-    ├── arch/         Reglas de arquitectura verificadas sobre el código
-    └── integration/  Aislamiento entre Spaces y matriz de permisos
+    ├── unit/          Pure logic. 17 files.
+    ├── arch/          Rules checked against the source tree and schema.prisma. 3 files.
+    └── integration/   Real Postgres: isolation, role matrix, every domain module. 17 files.
 ```
 
-### Reglas que el linter hace cumplir
+### Request pipeline
 
-No son convenciones: si las rompés, no pasa `pnpm check`.
+Every API endpoint goes through the same wrapper, in the same order. Declaring `space: { minRole }` forces the handler to have a `spaceId` in the path and hands it a database client that is already scoped.
 
-1. **El `PrismaClient` sin scope solo se importa desde `src/server/db/**`.**
-   El resto del código usa `forSpace(spaceId)`. Es imposible olvidarse de
-   filtrar por Space por accidente.
-2. **`src/shared/**` no importa Next, React ni Prisma.** Garantiza que el
-   futuro cliente nativo pueda reutilizar los contratos.
-3. **`process.env` solo se lee en los puntos de entrada del proceso.** Todo lo
-   demás usa `env`, ya validado.
-
-Además de ESLint, [`src/tests/arch/source-rules.test.ts`](src/tests/arch/source-rules.test.ts)
-verifica lo mismo sobre el código fuente — porque una regla de ESLint se puede
-desactivar con un comentario.
-
-### Cómo se garantiza el aislamiento entre Spaces
-
-Son tres capas independientes. Para filtrar datos de otro Space habría que
-atravesar las tres a la vez.
-
-1. **Extensión de Prisma** ([`space-scope.ts`](src/server/db/space-scope.ts)) —
-   toda operación pasa por un hook que inyecta el filtro `spaceId` en los
-   `where` y el valor correcto en los `data`. Un modelo sin clasificar hace
-   fallar la consulta en vez de dejarla pasar sin filtro.
-
-2. **Claves foráneas compuestas** — toda relación entre entidades del dominio
-   usa `(spaceId, id)` en vez de `(id)`. La extensión garantiza que una fila
-   nazca en el Space correcto, pero no valida los IDs que vienen en el body;
-   la FK compuesta convierte "transacción del Space A apuntando a una cuenta
-   del Space B" en un error de PostgreSQL.
-
-3. **Tests de integración** ([`space-scope.test.ts`](src/tests/integration/space-scope.test.ts))
-   — dos Spaces con datos reales y 26 pruebas que intentan cruzarlos pasando
-   IDs válidos del otro por todas las vías posibles.
-
-Y una cuarta que evita que las tres se pudran:
-[`db-scope-coverage.test.ts`](src/tests/arch/db-scope-coverage.test.ts) lee
-`schema.prisma` y falla si un modelo nuevo queda sin clasificar o si una
-relación entre modelos scopeados no usa FK compuesta.
-
-**La única salida de emergencia** es [`src/server/db/raw/`](src/server/db/raw/),
-donde vive el SQL crudo de los reportes —agrupar por mes necesita `date_trunc`,
-y el `groupBy` de Prisma solo admite columnas—. Ahí la extensión no llega, así
-que rige una regla propia: toda función recibe `spaceId` como primer parámetro y
-lo filtra. Un test de arquitectura verifica que ningún otro directorio use
-`$queryRaw`, y los tests de reportes comprueban el aislamiento consultando desde
-un Space con datos del otro al lado.
-
-### Autenticación
-
-Una sola resolución de sesión, [`resolveSession`](src/server/auth/session.ts),
-que acepta las dos formas de manera transparente:
-
-| Cliente | Credencial                  | Dónde viven los tokens                                    |
-| ------- | --------------------------- | --------------------------------------------------------- |
-| Web     | cookie httpOnly `monkey_at` | El navegador. JavaScript no puede leerlos                 |
-| Nativo  | `Authorization: Bearer`     | Llavero del sistema. Se piden con `X-Client-Type: native` |
-
-- **Access token**: JWT de 15 minutos, sin estado.
-- **Refresh token**: opaco, 60 días, guardado **hasheado** y **rotativo**. Si
-  llega uno ya rotado, se asume copia robada y se cierran todas las sesiones
-  del usuario.
-- **Revocación inmediata**: `User.sessionsRevokedAt` se compara con el `iat` de
-  cada access token, así "cerrar sesión en todos los dispositivos" y el reset
-  de contraseña surten efecto en el acto y no cuando expira el token.
-- Contraseñas con **argon2id** (19 MiB, t=2). El login corre el hash incluso
-  cuando el email no existe, para que el tiempo de respuesta no permita
-  enumerar cuentas.
-
-### Autorización dentro de un Space
-
-Los endpoints acotados a un Space **declaran su rol mínimo en el propio
-`route()`**, y ahí se resuelve todo antes de llegar al handler:
-
-```ts
-export const PATCH = route<UpdateSpaceRequest, Params>(
-  { body: schema, params: paramsSchema, space: { minRole: "ADMIN" } },
-  async ({ body, access, db }) => {
-    /* access y db ya están acotados */
-  },
-);
+```mermaid
+flowchart LR
+  C["Web (httpOnly cookie)<br/>or native (Bearer)"] --> R["route() wrapper"]
+  R --> RL["Rate limit<br/>sliding window per IP"]
+  RL --> Z["Zod<br/>body + params + query"]
+  Z --> S["resolveSession<br/>JWT + one User lookup"]
+  S --> A["requireSpaceAccess<br/>Membership row + minRole"]
+  A -- "not a member: 404<br/>role too low: 403" --> E["error body"]
+  A --> H["handler → service"]
+  H --> DB["forSpace(spaceId)<br/>Prisma extension injects spaceId<br/>into every where/data"]
+  DB --> PG[("PostgreSQL<br/>composite FKs (spaceId, id)<br/>CHECKs + partial unique indexes")]
 ```
 
-Declarar `space` obliga a que `params` traiga un `spaceId`, exige sesión con
-email verificado, resuelve la membresía y entrega un `db` ya scopeado. **No hay
-forma de escribir un endpoint de Space sin declarar qué rol hace falta.**
+### Rules the toolchain enforces
 
-| Rol      | Puede                                                      |
-| -------- | ---------------------------------------------------------- |
-| `OWNER`  | Todo, incluido eliminar el Space y transferir la propiedad |
-| `ADMIN`  | Todo salvo eliminar el Space o gestionar al OWNER          |
-| `MEMBER` | Cuentas, categorías y movimientos. No gestiona miembros    |
-| `VIEWER` | Solo lectura                                               |
+These are not conventions. Breaking them fails `pnpm check`.
 
-**404, nunca 403, si no sos miembro.** Un 403 confirmaría que el Space existe.
-El 403 (`INSUFFICIENT_ROLE`) se reserva para cuando sí sos miembro pero tu rol
-no alcanza — ahí ya sabés que existe, así que no se filtra nada nuevo.
+1. The unscoped `PrismaClient` is importable only from `src/server/db/**` (ESLint `no-restricted-imports`). Everything else uses `forSpace(spaceId)` or the deliberately loud `systemClient()`.
+2. `src/shared/**` cannot import Next, React, Prisma or anything from `src/server`.
+3. `process.env` is read only in process entry points; the rest of the code uses `env`, validated with Zod at startup ([src/env.schema.ts](src/env.schema.ts)). Production refuses to boot with `http://` in `APP_URL`, the `console` mail driver, or no `CRON_SECRET`.
+4. [db-scope-coverage.test.ts](src/tests/arch/db-scope-coverage.test.ts) parses `schema.prisma` and fails if a model with `spaceId` is not classified for the scope extension, or if a relation between two scoped models does not use a composite foreign key.
+5. [routes-manifest.test.ts](src/tests/arch/routes-manifest.test.ts) walks `src/app/api/**` and fails if any exported HTTP method is missing from [routes.manifest.ts](src/server/api/routes.manifest.ts). The manifest drives the role matrix and the isolation suite, so a new endpoint cannot skip either.
+6. [source-rules.test.ts](src/tests/arch/source-rules.test.ts) re-checks rules 1–3 on the source text, because an ESLint rule can be disabled with a comment. It also confines `$queryRaw` to `src/server/db/raw/`.
 
-### El manifiesto de rutas
+### Domain invariants in the database
 
-[`routes.manifest.ts`](src/server/api/routes.manifest.ts) declara cada endpoint
-con su método, autenticación y rol mínimo. De ahí salen tres tests:
+- Money is `BigInt` in minor units plus a `CHAR(3)` currency; amounts are always positive and the sign comes from `type` (CHECK). On the wire amounts are strings — `JSON.stringify` cannot serialize `bigint` and `number` loses precision past 2^53.
+- Cross-currency transactions store `exchangeRateSnapshot` and `amountPrimaryMinor` at write time. Reports aggregate `COALESCE(amountPrimaryMinor, amountMinor)` and never convert with today's rate.
+- Transfers are two `TRANSFER` rows sharing a `transferGroupId`; a partial unique index allows one leg per direction, a CHECK forbids a category on transfers, and both legs get the same primary-currency amount so net worth does not move.
+- Economic dates are `DATE` (no time, no zone); system timestamps are `timestamptz`. "I spent this on August 3rd" is a calendar fact, not an instant.
+- Tokens (refresh, verification, reset, invitation) are stored as SHA-256 hashes only.
 
-1. **[`routes-manifest.test.ts`](src/tests/arch/routes-manifest.test.ts)** recorre
-   `app/api/**` y falla si hay un `route.ts` que no esté declarado.
-2. **[`role-matrix.test.ts`](src/tests/integration/role-matrix.test.ts)** prueba
-   cada endpoint acotado a Space contra cada rol.
-3. La prueba de aislamiento usa el mismo inventario.
+## Stack
 
-El primero es el que sostiene a los otros dos: **si agregás un endpoint y te
-olvidás de registrarlo, la suite falla** — y por lo tanto ningún endpoint puede
-quedar fuera de la matriz de permisos sin que alguien se entere.
+- **Runtime:** Node 24, TypeScript 6 (`strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`), pnpm 11.
+- **Web:** Next.js 16 (App Router, Turbopack, `output: "standalone"`), React 19, Tailwind CSS 4, shadcn/ui on Radix, TanStack Query 5, Recharts, next-themes.
+- **API and domain:** Next route handlers, Zod 4 contracts shared with the client, pino logging.
+- **Data:** PostgreSQL 17, Prisma 7 with the `pg` driver adapter (no Rust engine), versioned SQL migrations (15 so far), 23 models.
+- **Auth:** argon2id via `@node-rs/argon2`, HS256 JWT via `jose`, rotating opaque refresh tokens.
+- **PWA:** Serwist 9 in configurator mode, generated icons and iOS splash screens via `sharp`.
+- **Mail:** nodemailer (SMTP / Mailpit in dev) or Resend, selected by env.
+- **Tooling:** Vitest 4 (unit, architecture, integration), ESLint 9 with `typescript-eslint` strict type-checked presets, Prettier, Docker multi-stage build.
 
-### El job de recurrentes
+## Technical decisions
 
-`POST /api/v1/jobs/recurring` es el **único endpoint que cruza Spaces** y el
-único que no se autentica con sesión: no hay un usuario detrás, hay un cron. Va
-con `Authorization: Bearer $CRON_SECRET`, comparado en tiempo constante, y
-`CRON_SECRET` es obligatorio en producción.
+### 1. Tenant isolation that survives buggy code
+
+**Problem.** Every financial table hangs off a `spaceId`. The usual approach — remembering to add `where: { spaceId }` in every query — fails the first time someone forgets, and the failure is silent: the other household's data just shows up.
+
+**Solution.** Three independent layers, each tested on its own ([space-scope.ts](src/server/db/space-scope.ts), [schema.prisma](prisma/schema.prisma), [space-isolation.test.ts](src/tests/integration/space-isolation.test.ts)):
+
+1. A Prisma client extension wraps every operation on every model. Scoped models get `spaceId` injected into `where` (AND-ed, so a hand-written foreign `spaceId` yields zero rows, not foreign rows) and into `data` on create. `Space` itself is scoped by its own primary key. Identity models (`User`, `RefreshToken`, `VerificationToken`) throw if touched through a scoped client. An unclassified model throws instead of passing through. Updates that try to change `spaceId` throw.
+2. Every relation between two scoped models is a composite foreign key `(spaceId, id)`, with `@@unique([spaceId, id])` on the target. The extension guarantees a row is born in the right Space but does not validate IDs coming from a request body; the composite FK turns "transaction in Space A pointing at an account in Space B" into a PostgreSQL error.
+3. `requireSpaceAccess` is the only function that turns a path `spaceId` into a permission. It answers 404 for non-members — a 403 would confirm the Space exists — and reserves 403 for members whose role is too low.
+
+**Trade-offs.** Nested `include`/`select` do not pass through the extension; they are safe only because of the composite FKs, and they can return soft-deleted rows. Join tables (`TransactionTag`, `BudgetAccount`) carry a denormalized `spaceId` so the invariant "every domain table has spaceId" holds without exceptions. Composite FKs cannot use `ON DELETE SET NULL` (Postgres would null the `spaceId` column too), so those relations use `RESTRICT` and the domain relies on soft delete. Raw SQL (needed for `date_trunc` in monthly reports, which Prisma's `groupBy` cannot express) bypasses the extension entirely, so it is confined to one directory, takes `spaceId` as the first parameter, and is covered by report isolation tests.
+
+### 2. An idempotent, backfilling job for recurring transactions
+
+**Problem.** A cron hits `POST /api/v1/jobs/recurring` once a day. Cron jobs get retried, run twice, or don't run for three weeks because the VPS was down. The naive implementations either duplicate rent when triggered twice or, after downtime, create one transaction dated today, putting January's rent in March's report.
+
+**Solution** ([materialize.ts](src/server/services/recurring/materialize.ts), [recurrence.ts](src/shared/recurrence.ts)):
+
+- All overdue occurrences are materialized, each with its own calendar date. The date is an economic fact, not the time a process ran.
+- Idempotency lives in the database: a partial unique index on `(spaceId, recurringRuleId, date)` plus `createMany({ skipDuplicates: true })`. Firing the job twice is harmless.
+- One database transaction per rule: the new transactions and the rule's `nextRunDate` advance together. If they were saved separately and the process died in between, the rule would retry the same dates forever (rejected by the index, but never advancing). A rule that fails — no exchange rate loaded for that date, for example — is counted and the sweep continues with the rest.
+- A cap of 60 occurrences per rule per run bounds the size of a recovery transaction; the remainder is reported as `truncated` and picked up next run. Rules are paginated by id cursor, not offset, because the sweep mutates the set it iterates.
+- Occurrences are computed from the anchor date, never from the previous occurrence. Chained month arithmetic would move "every month on the 31st" to the 28th after February and leave it there.
+- The dashboard runs the same function scoped to one Space before rendering, so today's rent appears in "to confirm" even if no cron is configured.
+
+**Trade-offs.** The job's "today" is UTC, not each Space's timezone; the difference is at most one day and the next run corrects it. The per-run cap means a daily rule that was down for six months takes three runs to catch up. The endpoint authenticates with a shared secret compared in constant time rather than a session, because no user is behind it.
+
+### 3. Sessions: short JWTs, rotating refresh tokens, immediate revocation
+
+**Problem.** Stateless JWTs make "log out everywhere" and password reset take effect only when the token expires. Long-lived refresh tokens in a database are a liability if the database leaks, and a stolen refresh token is indistinguishable from the real one.
+
+**Solution** ([sessions.ts](src/server/services/auth/sessions.ts), [session.ts](src/server/auth/session.ts), [tokens.ts](src/server/auth/tokens.ts)):
+
+- Access token: 15-minute HS256 JWT carrying the user id and a session id. Refresh token: 32 random bytes, 60 days, stored only as SHA-256, rotated on every use inside a transaction.
+- Reuse detection: presenting a refresh token that has already been rotated means two parties hold the same chain. Every session of that user is revoked, because there is no way to tell which party is legitimate.
+- `User.sessionsRevokedAt` is compared against each access token's `iat` on every request. Password reset and "revoke all" take effect immediately, not at expiry.
+- Login runs argon2id against a dummy hash when the email does not exist, so response time does not reveal which accounts are real. Per-IP limits are a sliding window in memory; per-account lockout (8 failures → 15 minutes) is in the `User` row because a brute-force attempt against one account has to survive a redeploy.
+- Web clients get httpOnly `Secure` cookies; native clients send `X-Client-Type: native` and receive tokens in the body. One `resolveSession` handles both.
+- The client de-duplicates refreshes: five queries failing with 401 after the app returns from background trigger one refresh, not five rotations — four of which would look like reuse and log the user out.
+
+**Trade-offs.** Session resolution does one primary-key lookup per request, so it is not fully stateless; the lookup returns timezone, locale and verification state that most endpoints need anyway. The in-memory rate limiter resets on deploy and is per-process, which is acceptable for one container and would need Redis behind the existing interface for several.
+
+### 4. A Service Worker that cannot serve another user's data
+
+**Problem.** An installable PWA needs runtime caching of API responses to be usable on a bad connection. The classic bug is a cached response from user A or Space A surfacing after switching to B — on a shared device, with shared households, this is a data leak.
+
+**Solution** ([sw.ts](src/app/sw.ts), [sw-bridge.ts](src/lib/sw-bridge.ts)):
+
+- `GET /api/v1/spaces/:spaceId/**` is network-first (balances that look current but aren't are worse than a spinner) into a cache named per Space. Switching Spaces cannot read the other cache by construction.
+- The client tells the worker who is logged in and sends a purge message on logout and on Space switch, before navigating. Everything under `/me`, `/auth` and `/spaces` (the endpoints that define who you are) is never cached.
+- Each cached response is stamped with the user id that requested it. On a cache hit, a mismatch with the current user deletes the entry and goes to the network. This covers the case where the purge message never arrived because the worker was asleep.
+- Every activation of a new worker version purges the API caches, since a deploy can change response shapes.
+- Precache is the app shell only (CSS, fonts, `/offline`, manifest — around 70 kB). JavaScript chunks are cache-first at runtime because their names are content-hashed.
+
+**Trade-offs.** A screen never visited does not work offline; the alternative was 3 MB of precache on first install over mobile data. There is no offline write queue — the offline page says so. Serwist runs in configurator mode as a separate build step after `next build`, because its webpack plugin would force the whole build off Turbopack; the side effect is that development has no Service Worker at all, and the app actively unregisters any leftover production worker on `localhost`.
+
+## Local setup
+
+Prerequisites: Node ≥ 24, pnpm 11 (`corepack enable`), Docker.
+
+```bash
+pnpm install
+cp .env.example .env          # then set AUTH_SECRET (see below)
+pnpm docker:up                # Postgres (dev + test) and Mailpit
+pnpm db:migrate
+pnpm db:seed                  # optional: three users and a shared Space
+pnpm dev
+```
+
+Generate `AUTH_SECRET` with a cryptographic source, e.g. `openssl rand -base64 48`.
+
+| Service                        | Address               |
+| ------------------------------ | --------------------- |
+| App                            | http://localhost:3000 |
+| Mailpit (outgoing mail in dev) | http://localhost:8025 |
+| Postgres (dev)                 | localhost:5442        |
+| Postgres (tests)               | localhost:5443, tmpfs |
+
+### Environment variables
+
+Validated with Zod at startup; the process refuses to boot on invalid config. Names only — see [.env.example](.env.example) for comments and defaults.
 
 ```
-15 3 * * * curl -fsS -X POST \
-  -H "Authorization: Bearer $CRON_SECRET" \
-  https://monkey.example/api/v1/jobs/recurring
+NODE_ENV  APP_URL  LOG_LEVEL
+DATABASE_URL
+AUTH_SECRET  ACCESS_TOKEN_TTL_MINUTES  REFRESH_TOKEN_TTL_DAYS
+EMAIL_VERIFICATION_TTL_HOURS  PASSWORD_RESET_TTL_MINUTES  INVITATION_TTL_DAYS
+MAIL_DRIVER  MAIL_FROM  RESEND_API_KEY
+SMTP_HOST  SMTP_PORT  SMTP_USER  SMTP_PASSWORD  SMTP_SECURE
+DEFAULT_LOCALE  DEFAULT_CURRENCY  DEFAULT_TIMEZONE
+STORAGE_DRIVER  STORAGE_LOCAL_DIR
+CRON_SECRET
+RATE_LIMIT_ENABLED
 ```
 
-**Si el job estuvo caído, se materializan TODAS las ocurrencias vencidas, cada
-una con su fecha.** Si el alquiler vencía el 1 y el job recién corre el 20, la
-transacción se fecha el 1. Las otras dos opciones son peores: saltear al futuro
-perdería un gasto que sí salió de la cuenta, y meter una sola fechada hoy
-pondría el alquiler de enero en el mes de marzo y todos los reportes mensuales
-pasarían a mentir. La fecha es un hecho económico, no la hora a la que corrió un
-proceso.
+Required without a default: `DATABASE_URL`, `AUTH_SECRET`. Required in production: `CRON_SECRET`, an `https` `APP_URL`, and a real mail driver.
 
-Tres frenos lo acompañan:
+### Commands
 
-1. **Tope de 60 ocurrencias por regla y corrida.** Una regla diaria caída seis
-   meses generaría 180 filas de un saque. Se reparte entre corridas — no se
-   saltea nada, y lo que queda pendiente sale en el reporte y en el log.
-2. **Idempotencia en la base.** Un unique parcial sobre
-   `(spaceId, recurringRuleId, date)` impide que dos disparos del cron dupliquen
-   el mismo mes. Dispararlo de más es inocuo.
-3. **Una transacción de base por regla.** Si una regla falla —por ejemplo, no
-   hay cotización cargada para su fecha— se cuenta como fallo y el barrido sigue
-   con las demás.
+| Command                 | What it does                                                        |
+| ----------------------- | ------------------------------------------------------------------- |
+| `pnpm check`            | typecheck + lint + format check + unit/arch tests                   |
+| `pnpm test`             | Unit and architecture tests, no database (20 files, 402 tests)      |
+| `pnpm test:integration` | Integration tests against the tmpfs Postgres (17 files, ~400 cases) |
+| `pnpm db:migrate`       | Create and apply a migration in development                         |
+| `pnpm db:deploy`        | Apply committed migrations (what the Docker image runs at start)    |
+| `pnpm user:create`      | Create a verified first user without going through email            |
+| `pnpm pwa:assets`       | Regenerate icons and iOS splash screens from the logo               |
+| `pnpm build`            | `prisma generate` + `next build` + `serwist build`                  |
 
-El motor de recurrencia ([`recurrence.ts`](src/shared/recurrence.ts)) es puro y
-calcula cada ocurrencia **desde el ancla, nunca desde la anterior**. Encadenando
-sumas, "cada mes el 31" pasaría por el 28 de febrero y se quedaría en el 28 para
-siempre.
+`prisma db push` is never used; every schema change is a committed migration.
 
-### PWA
+### Production
 
-Instalable en la pantalla de inicio de un iPhone. Los assets (10 íconos, 10
-pantallas de arranque) se **generan** con `pnpm pwa:assets`: son SVG dibujado
-con geometría pura, sin tipografías ni emoji, así que el mismo comando da el
-mismo resultado en cualquier máquina.
+```bash
+cp .env.example .env.production   # fill in real values
+docker compose -f docker-compose.prod.yml up -d --build
+```
 
-El Service Worker se construye en un paso aparte —`serwist build`, que ya está
-dentro de `pnpm build`— porque el plugin de webpack de Serwist obligaría a
-abandonar Turbopack en todo el build.
+The image is multi-stage (deps → build → runtime), runs as a non-root user, copies only the standalone output, and executes `prisma migrate deploy` before `node server.js`. Postgres is not published to the host. Put a reverse proxy in front for TLS. Schedule the recurring job:
 
-| Recurso                               | Estrategia                               |
-| ------------------------------------- | ---------------------------------------- |
-| App shell (CSS, `/offline`, manifest) | Precarga: 67 kB, no 3 MB                 |
-| `/_next/static/**`                    | CacheFirst — tienen hash, son inmutables |
-| Íconos y splash                       | CacheFirst, 30 días                      |
-| `GET /api/v1/spaces/:id/**`           | NetworkFirst, un caché **por Space**     |
-| Resto de la API                       | Sin caché nunca                          |
+```
+15 3 * * * curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/v1/jobs/recurring
+```
 
-**El requisito que el brief marca como bug clásico** —que el SW no sirva datos
-de otro usuario o de otro Space— se ataca por tres lados, porque cualquiera
-solo tiene un agujero:
+## Project status
 
-1. **Un caché por Space** (`monkey-api-{spaceId}`). Cambiar de Space no puede
-   leer el caché de otro: son cachés distintos.
-2. **Purga explícita** al cerrar sesión y al cambiar de Space, disparada desde
-   el cliente antes de navegar.
-3. **Sello de usuario en cada respuesta cacheada.** Si al leerla el usuario
-   actual no coincide, se descarta y se va a la red. Cubre el caso feo: que el
-   mensaje de purga no llegue porque el SW estaba dormido.
+Actively developed; the latest changes are UX fixes to goals and transaction editing (late August 2026). The three planned phases — core domain and auth, analysis (budgets, reports, transfers, recurring), and goals/debts/import/attachments/splitting — are implemented and covered by integration tests.
 
-Además se purga al activar una versión nueva del SW: un deploy puede cambiar la
-forma de las respuestas.
+Known gaps, as of the code today:
 
-Sobre offline: funciona cualquier pantalla ya visitada. Una que nunca se abrió
-muestra la pantalla de sin conexión — es la contrapartida de no precargar 3 MB
-en la instalación. **No hay cola de escrituras offline en la Fase 1**, y la
-pantalla no promete lo contrario.
-
-### Convenciones de dominio
-
-- **Nada de floats para dinero.** Todos los importes son enteros (`BigInt`) en
-  la unidad mínima de la moneda, con su `currency` ISO 4217 al lado. Sobre el
-  cable viajan como **strings**: `JSON.stringify` no sabe serializar `bigint` y
-  un `number` pierde precisión arriba de 2^53.
-- **El importe siempre es positivo.** El signo lo determina el `type` de la
-  transacción, no el valor. En las transferencias, donde las dos patas comparten
-  el tipo TRANSFER, lo determina `transferDirection`.
-- **Una transferencia no cambia el patrimonio.** Sus dos patas valen exactamente
-  lo mismo en la moneda primaria, aunque las cuentas estén en monedas distintas.
-  No se controla después: se calcula un solo importe en moneda primaria y se le
-  asigna a las dos.
-- **Entre monedas distintas se piden los dos importes, no una cotización.** El
-  banco no aplica la cotización publicada: aplica la suya y cobra comisión.
-  Diciendo cuánto salió y cuánto llegó, la cotización real de la operación sale
-  sola y el saldo cuadra contra el extracto.
-- **Un movimiento recurrente atrasado se materializa con SU fecha**, no con la
-  del día en que corrió el job. Ver abajo.
-- **Repartir un gasto es una anotación, no una deuda.** Generar una fila de
-  deuda por cada gasto compartido daría cincuenta deudas de siete euros que
-  nadie salda una por una. El saldo entre personas se **calcula** agregando los
-  repartos, y se cancela con un saldado. Ni repartir ni saldar generan un
-  movimiento: el gasto ya estaba cargado, y saldar solo reequilibra quién puso
-  qué dentro del Space — si generara uno, el mes en que se ponen al día
-  parecería el mes de un gasto enorme.
-- **La suma de los saldos es siempre cero**, y hay un test de eso. Es la
-  comprobación de que no se inventó ni se perdió plata entre personas. Los pagos
-  sugeridos son los mínimos: con N personas, N−1 como mucho.
-- **Los adjuntos se sirven por un endpoint autenticado, no por URL firmada.**
-  Una URL firmada es un token en la barra de direcciones: queda en el historial,
-  viaja en el `Referer`, sobrevive a una captura compartida y **no se puede
-  revocar** — sigue funcionando después de expulsar a alguien del Space. Acá la
-  membresía se comprueba en cada petición, y al vivir bajo
-  `/api/v1/spaces/:id/**` el adjunto entra en el mismo borrado de caché por
-  Space que el resto de la API.
-- **El tipo del archivo sale de sus bytes**, nunca del `Content-Type`: lo manda
-  el cliente. Un ejecutable renombrado a `.jpg` y anunciado como `image/jpeg`
-  pasa cualquier validación basada en lo que dice quien sube.
-- **La clave del storage se genera, no se deriva del nombre.** Es la defensa
-  contra el path traversal por construcción y no por saneamiento: si se armara
-  con el nombre del cliente habría que acertar con todas las formas de escribir
-  `..`, y basta fallar una vez.
-- **Importar es en dos pasos, y el primero no puede mentir.** La
-  previsualización usa el MISMO endpoint con `dryRun`: recorre parseo,
-  validación, duplicados y resolución de categorías, y solo se salta la
-  escritura. Si dice que entran 47, entran 47. Y la regla de qué rechaza: **la
-  plata que se movió entra**. Una categoría que no existe es una etiqueta que
-  falta, no una razón para descartar un gasto — la fila entra sin categoría y se
-  avisa. Una fecha o un importe ilegibles sí son errores.
-- **El CSV exportado lleva el ID interno** en la primera columna. Es lo que hace
-  exacta la ida y vuelta: reimportarlo no duplica nada. Un ID de otra
-  instalación no coincide con nada y cae en la detección normal de duplicados.
-- **Las deudas registran, no amortizan.** El saldo es `original − pagos`, sin
-  capitalizar intereses. Calcular la cuota de un préstamo daría un número que no
-  coincide con el recibo del banco —convenciones de días, comisiones, seguros,
-  redondeos— y un número casi correcto en finanzas es peor que ninguno. La tasa
-  sí se usa: para decir cuánto **cuesta por mes** el saldo pendiente, que es
-  aritmética sobre lo que escribiste y no una predicción sobre tu banco.
-- **La posición neta vive aparte de la curva de los reportes.** Esa curva es una
-  posición de caja; meterle deudas redefiniría en silencio lo que significan
-  todos los reportes que ya existen. Un préstamo recién recibido lo muestra: los
-  10.000 € están en la cuenta —la caja sube— y el neto no se movió. Las dos
-  cifras son ciertas y responden preguntas distintas.
-- **Ahorrar no es gastar.** Un aporte a una meta nunca crea un movimiento:
-  apartar 200 € no baja el patrimonio, la plata sigue siendo tuya. O se vincula
-  a un movimiento que ya existe —la transferencia a la cuenta de ahorro— o es
-  puro registro. Y el progreso de una meta son sus aportes, no el saldo de
-  ninguna cuenta: atarlo al saldo se rompe apenas esa cuenta se use para otra
-  cosa, y con dos metas sobre la misma cuenta las dos mostrarían el total.
-- **Lo apartado se calcula, no se descuenta.** Si una meta tiene cuenta, sus
-  aportes aparecen como apartados ahí y la cuenta muestra `saldo − apartado =
-disponible`. El saldo no se toca: es lo que el banco tiene y tiene que cuadrar
-  contra el extracto; lo apartado es una intención. Son dos cifras ciertas que
-  responden preguntas distintas —"cuánto hay" y "de eso, cuánto ya tiene
-  dueño"—. Lo disponible puede dar **negativo**, y se muestra así: significa que
-  la plata de alguna meta ya no está. Una meta en otra moneda que apunte a la
-  cuenta no se suma —haría falta una cotización inventada—, se avisa.
-- **Multi-moneda desde el día uno.** Cada transacción congela su tipo de cambio
-  al crearse. Los reportes históricos nunca se recalculan con la tasa de hoy.
-- **`spaceId` va en la URL**, no en el body ni en un header: hace que las
-  cache keys del Service Worker queden scopeadas por Space, y que el aislamiento
-  sea testeable endpoint por endpoint.
-- **404, no 403,** cuando un recurso pertenece a otro Space. Un 403 confirmaría
-  que el recurso existe.
+- No offline write queue. Reads work offline for visited screens; writes require a connection.
+- Attachments have a single storage driver (local disk behind an interface). S3-compatible storage would be a new driver, not a domain change.
+- Exchange rates are entered manually. The provider interface exists; no automatic source is wired in.
+- The per-IP rate limiter is in-process memory. Fine for one container; multi-replica needs a Redis implementation of the same interface.
+- `/api/health` is a liveness probe only; there is no readiness check that touches the database.
+- UI copy is Spanish only. Locale and timezone are per user, but they drive formatting, not translation.
+- No hosted CI pipeline is committed; `pnpm check` is the gate and runs locally.
+- The API is designed for a native client (shared contracts, Bearer auth), but no native client exists yet.
