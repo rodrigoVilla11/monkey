@@ -98,6 +98,7 @@ export const register = async (
         name: input.name,
         timezone,
         locale,
+        preferredCurrency: currency,
       },
     });
 

@@ -164,6 +164,7 @@ describe("registro", () => {
 
     expect(user?.locale).toBe("es-ES");
     expect(user?.timezone).toBe("Europe/Madrid");
+    expect(user?.preferredCurrency).toBe("EUR");
     expect(space?.primaryCurrency).toBe("EUR");
   });
 
@@ -184,6 +185,7 @@ describe("registro", () => {
     const space = await testDb.space.findUnique({ where: { id: spaceId } });
 
     expect(user?.timezone).toBe("America/Argentina/Buenos_Aires");
+    expect(user?.preferredCurrency).toBe("ARS");
     expect(space?.primaryCurrency).toBe("ARS");
   });
 

@@ -160,9 +160,13 @@ model User {
   activeSpaceId String?
 
   // preferencias
-  theme        ThemePreference @default(SYSTEM)
+  theme             ThemePreference @default(SYSTEM)
   /// 0 = domingo … 6 = sábado. Afecta reportes semanales y presupuestos WEEKLY.
-  weekStartsOn Int             @default(1)
+  weekStartsOn      Int             @default(1)
+  /// Moneda preferida de la persona. Es el default que la UI propone al crear
+  /// Spaces, cuentas y deudas. NO toca la moneda de consolidación de los Spaces
+  /// que ya existen: esa es inmutable (ver Space.primaryCurrency).
+  preferredCurrency String          @default("EUR") @db.Char(3)
 
   // seguridad
   /// Rate limiting por email que sobrevive a un redeploy (el de IP es en memoria).

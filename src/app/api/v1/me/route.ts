@@ -23,9 +23,9 @@ export const GET = route({ auth: true }, async ({ session }) =>
 /**
  * PATCH /api/v1/me
  *
- * Nombre, timezone, locale, tema y primer día de la semana. El email no se
- * cambia por acá: eso necesitaría su propio flujo de verificación de la nueva
- * dirección.
+ * Nombre, timezone, locale, tema, moneda preferida y primer día de la semana.
+ * El email no se cambia por acá: eso necesitaría su propio flujo de
+ * verificación de la nueva dirección.
  */
 export const PATCH = route<UpdateProfileRequest>(
   { body: updateProfileRequestSchema, auth: true, verified: true },

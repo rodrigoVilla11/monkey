@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ChartColumn,
   ChevronRight,
+  Coins,
   HandCoins,
   LogOut,
   Moon,
@@ -19,13 +20,21 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ApiError } from "@/lib/api-client";
 import { initials } from "@/lib/format";
-import { useActiveSpace, useLogout, useSession } from "@/lib/hooks/use-session";
+import {
+  useActiveSpace,
+  useLogout,
+  useSession,
+  useUpdateProfile,
+} from "@/lib/hooks/use-session";
 import { cn } from "@/lib/utils";
+import { SUGGESTED_CURRENCIES } from "@/shared/currency";
 import { ROLE_LABELS } from "@/shared/roles";
 
 export default function SettingsPage() {
@@ -42,6 +51,19 @@ export default function SettingsPage() {
   const mounted = resolvedTheme !== undefined;
 
   const user = session.data;
+  const updateProfile = useUpdateProfile();
+
+  /**
+   * La preferida va primera aunque no esté entre las sugeridas (se puede haber
+   * elegido cualquier código ISO por la API): si no, la pantalla mostraría
+   * once monedas y ninguna marcada.
+   */
+  const preferred = user?.preferredCurrency;
+  const currencyOptions: readonly string[] =
+    preferred === undefined ||
+    SUGGESTED_CURRENCIES.some((option) => option === preferred)
+      ? SUGGESTED_CURRENCIES
+      : [preferred, ...SUGGESTED_CURRENCIES];
 
   return (
     <div className="space-y-5 py-3">
@@ -138,6 +160,53 @@ export default function SettingsPage() {
             icon={<Upload className="size-4" />}
             label="Importar y exportar"
           />
+
+          <div className="space-y-2 px-4 py-3">
+            <span className="flex min-h-touch items-center gap-3 text-sm">
+              <Coins className="size-4" />
+              Moneda principal
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {currencyOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  disabled={updateProfile.isPending}
+                  aria-pressed={preferred === option}
+                  onClick={() => {
+                    if (option === preferred) return;
+                    updateProfile.mutate(
+                      { preferredCurrency: option },
+                      {
+                        onSuccess: () => {
+                          toast.success(`Moneda principal: ${option}`);
+                        },
+                        onError: (error: unknown) => {
+                          toast.error(
+                            error instanceof ApiError
+                              ? error.message
+                              : "No se pudo guardar",
+                          );
+                        },
+                      },
+                    );
+                  }}
+                  className={cn(
+                    "min-h-touch rounded-full border px-3 text-sm tabular-nums",
+                    preferred === option &&
+                      "border-primary bg-primary text-primary-foreground",
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Es la que se propone al crear espacios, cuentas y deudas. No
+              cambia la moneda de los espacios que ya existen ni de los
+              movimientos ya cargados.
+            </p>
+          </div>
 
           <div className="flex min-h-touch items-center justify-between px-4 py-3">
             <span className="flex items-center gap-3 text-sm">

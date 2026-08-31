@@ -128,6 +128,11 @@ export const updateProfileRequestSchema = z
     locale: localeSchema.optional(),
     theme: z.enum(["SYSTEM", "LIGHT", "DARK"]).optional(),
     weekStartsOn: z.number().int().min(0).max(6).optional(),
+    /**
+     * Solo cambia qué moneda se propone por defecto al crear Spaces, cuentas y
+     * deudas. La moneda de consolidación de los Spaces existentes no se toca.
+     */
+    preferredCurrency: currencySchema.optional(),
     avatarUrl: z.url().max(500).nullable().optional(),
   })
   .refine(
@@ -152,6 +157,7 @@ export interface SessionUser {
   readonly locale: string;
   readonly theme: "SYSTEM" | "LIGHT" | "DARK";
   readonly weekStartsOn: number;
+  readonly preferredCurrency: string;
   readonly emailVerified: boolean;
   readonly activeSpaceId: string | null;
 }

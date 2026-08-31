@@ -22,6 +22,7 @@ const toSessionUser = (user: {
   locale: string;
   theme: "SYSTEM" | "LIGHT" | "DARK";
   weekStartsOn: number;
+  preferredCurrency: string;
   emailVerifiedAt: Date | null;
   activeSpaceId: string | null;
 }): SessionUser => ({
@@ -33,6 +34,7 @@ const toSessionUser = (user: {
   locale: user.locale,
   theme: user.theme,
   weekStartsOn: user.weekStartsOn,
+  preferredCurrency: user.preferredCurrency,
   emailVerified: user.emailVerifiedAt !== null,
   activeSpaceId: user.activeSpaceId,
 });
@@ -46,6 +48,7 @@ const SELECT = {
   locale: true,
   theme: true,
   weekStartsOn: true,
+  preferredCurrency: true,
   emailVerifiedAt: true,
   activeSpaceId: true,
 } as const;
@@ -73,6 +76,9 @@ export const updateProfile = async (
       ...(input.theme !== undefined ? { theme: input.theme } : {}),
       ...(input.weekStartsOn !== undefined
         ? { weekStartsOn: input.weekStartsOn }
+        : {}),
+      ...(input.preferredCurrency !== undefined
+        ? { preferredCurrency: input.preferredCurrency }
         : {}),
       ...(input.avatarUrl !== undefined ? { avatarUrl: input.avatarUrl } : {}),
     },

@@ -6,7 +6,10 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
 import { purgeApiCaches, setServiceWorkerUser } from "@/lib/sw-bridge";
-import type { SessionUser } from "@/shared/contracts/auth";
+import type {
+  SessionUser,
+  UpdateProfileRequest,
+} from "@/shared/contracts/auth";
 import type { SpaceSummary } from "@/shared/contracts/spaces";
 
 /**
@@ -71,6 +74,25 @@ export const useActiveSpace = (): {
     spaces: list,
     isLoading: session.isLoading || spaces.isLoading,
   };
+};
+
+/**
+ * Preferencias del perfil (nombre, moneda preferida, etc.).
+ *
+ * El servidor devuelve el usuario ya actualizado, así que se escribe directo en
+ * la caché de `/me` en vez de invalidar: la pantalla refleja el cambio sin un
+ * segundo request.
+ */
+export const useUpdateProfile = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateProfileRequest) =>
+      api.patch<{ user: SessionUser }>("/me", input),
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.me, data);
+    },
+  });
 };
 
 /**

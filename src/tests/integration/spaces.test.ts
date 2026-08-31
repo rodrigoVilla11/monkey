@@ -115,6 +115,20 @@ describe("creación de Spaces", () => {
     expect(space.timezone).toBe("America/Argentina/Buenos_Aires");
   });
 
+  it("hereda la moneda preferida de quien crea, no la del entorno", async () => {
+    const rodrigo = await createPerson("rodrigo");
+    await testDb.user.update({
+      where: { id: rodrigo.userId },
+      data: { preferredCurrency: "ARS" },
+    });
+
+    const space = await createSpace(rodrigo.userId, rodrigo.name, {
+      name: "Viaje",
+    });
+
+    expect(space.primaryCurrency).toBe("ARS");
+  });
+
   it("lista los Spaces con el rol de cada uno y el personal primero", async () => {
     const rodrigo = await createPerson("rodrigo");
     await createSpace(rodrigo.userId, rodrigo.name, { name: "Casa" });

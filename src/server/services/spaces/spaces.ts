@@ -1,4 +1,3 @@
-import { env } from "@/env";
 import { errors } from "@/server/api/errors";
 import { systemClient } from "@/server/db/system";
 import { writeAuditLog } from "@/server/services/audit/log";
@@ -102,10 +101,11 @@ export const createSpace = async (
 
   // Los defaults salen de las preferencias de quien crea, no del entorno:
   // alguien en Madrid que abre un Space para gastos de un viaje a Argentina
-  // igual quiere su timezone por defecto y elige la moneda a mano.
+  // igual quiere su timezone por defecto, y la moneda propuesta es la que
+  // eligió en Ajustes — puede pisarla a mano en el formulario.
   const creator = await db.user.findUnique({
     where: { id: userId },
-    select: { timezone: true, locale: true },
+    select: { timezone: true, locale: true, preferredCurrency: true },
   });
 
   if (creator === null) throw errors.notFound("No se encontró el usuario");
@@ -114,7 +114,7 @@ export const createSpace = async (
     const created = await tx.space.create({
       data: {
         name: input.name,
-        primaryCurrency: input.primaryCurrency ?? env.DEFAULT_CURRENCY,
+        primaryCurrency: input.primaryCurrency ?? creator.preferredCurrency,
         timezone: input.timezone ?? creator.timezone,
         icon: input.icon ?? null,
         color: input.color ?? null,

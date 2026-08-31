@@ -65,6 +65,14 @@ export default function AccountsPage() {
   const canEdit = space !== undefined && hasAtLeast(space.role, "MEMBER");
   const canDelete = space !== undefined && hasAtLeast(space.role, "ADMIN");
 
+  /**
+   * La preseleccionada al crear es la preferida de la persona (Ajustes), no la
+   * del Space: en un Space heredado en EUR, alguien que maneja ARS no tiene por
+   * qué destildar EUR cada vez. La del Space sigue mandando en la conversión.
+   */
+  const primaryCurrency = space?.primaryCurrency ?? "EUR";
+  const defaultCurrency = session.data?.preferredCurrency ?? primaryCurrency;
+
   // Mover plata necesita dos puntas: con una sola cuenta no hay adónde.
   const activeCount =
     accounts.data?.filter((account) => !account.isArchived).length ?? 0;
@@ -137,10 +145,15 @@ export default function AccountsPage() {
       </button>
 
       <NewAccountSheet
+        // La moneda preseleccionada vive en un useState del sheet. Si la sesión
+        // termina de cargar después del primer render, el `key` lo remonta con
+        // el valor bueno — el drawer todavía está cerrado, no se nota.
+        key={defaultCurrency}
         open={showNew}
         onOpenChange={setShowNew}
         spaceId={spaceId}
-        defaultCurrency={space?.primaryCurrency ?? "EUR"}
+        defaultCurrency={defaultCurrency}
+        primaryCurrency={primaryCurrency}
       />
 
       {editing !== null && (
@@ -507,11 +520,15 @@ function NewAccountSheet({
   onOpenChange,
   spaceId,
   defaultCurrency,
+  primaryCurrency,
 }: {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   spaceId: string;
+  /** La que arranca elegida: la preferida de la persona. */
   defaultCurrency: string;
+  /** La de consolidación del Space: contra esta se convierte en el inicio. */
+  primaryCurrency: string;
 }) {
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("BANK");
@@ -523,12 +540,12 @@ function NewAccountSheet({
   const create = useCreateAccount(spaceId);
 
   /**
-   * La del Space primero: es la que se elige casi siempre y tenerla que buscar
-   * entre once sería absurdo.
+   * La preferida primero: es la que se elige casi siempre y tenerla que buscar
+   * entre once sería absurdo. La del Space se cuela después por si no está
+   * entre las sugeridas.
    */
   const currencyOptions = [
-    defaultCurrency,
-    ...SUGGESTED_CURRENCIES.filter((option) => option !== defaultCurrency),
+    ...new Set([defaultCurrency, primaryCurrency, ...SUGGESTED_CURRENCIES]),
   ];
 
   const balanceInvalid = balance !== "" && !isAmountInput(balance);
@@ -620,9 +637,9 @@ function NewAccountSheet({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              {currency === defaultCurrency
+              {currency === primaryCurrency
                 ? "Después no se puede cambiar: los movimientos ya cargados quedarían en una moneda que la cuenta ya no tiene."
-                : `El saldo se guarda en ${currency}. En el inicio se muestra convertido a ${defaultCurrency} con la última cotización que tengas cargada — si falta, lo dice en vez de inventarla. Después no se puede cambiar.`}
+                : `El saldo se guarda en ${currency}. En el inicio se muestra convertido a ${primaryCurrency} con la última cotización que tengas cargada — si falta, lo dice en vez de inventarla. Después no se puede cambiar.`}
             </p>
           </div>
 

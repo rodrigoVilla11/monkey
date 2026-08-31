@@ -247,6 +247,11 @@ export default function DebtsPage() {
   const locale = session.data?.locale ?? "es-ES";
   const canEdit = space !== undefined && hasAtLeast(space.role, "MEMBER");
 
+  // Preselecciona la preferida de la persona (Ajustes); la del Space sigue
+  // siendo contra la que se convierte la posición neta.
+  const primaryCurrency = space?.primaryCurrency ?? "EUR";
+  const defaultCurrency = session.data?.preferredCurrency ?? primaryCurrency;
+
   return (
     <div className="space-y-4 py-3">
       <div className="flex items-center justify-between">
@@ -365,10 +370,15 @@ export default function DebtsPage() {
       )}
 
       <NewDebtSheet
+        // La moneda preseleccionada vive en un useState del sheet. Si la sesión
+        // termina de cargar después del primer render, el `key` lo remonta con
+        // el valor bueno — el drawer todavía está cerrado, no se nota.
+        key={defaultCurrency}
         open={showNew}
         onOpenChange={setShowNew}
         spaceId={spaceId}
-        defaultCurrency={space?.primaryCurrency ?? "EUR"}
+        defaultCurrency={defaultCurrency}
+        primaryCurrency={primaryCurrency}
       />
 
       {/**
@@ -656,11 +666,15 @@ function NewDebtSheet({
   onOpenChange,
   spaceId,
   defaultCurrency,
+  primaryCurrency,
 }: {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   spaceId: string;
+  /** La que arranca elegida: la preferida de la persona. */
   defaultCurrency: string;
+  /** La de consolidación del Space: contra esta se convierte la posición neta. */
+  primaryCurrency: string;
 }) {
   const queryClient = useQueryClient();
   const session = useSession();
@@ -676,10 +690,9 @@ function NewDebtSheet({
   const [installments, setInstallments] = useState("");
   const [plan, setPlan] = useState<PlanDraft | null>(null);
 
-  /** La del Space primero, igual que al crear una cuenta. */
+  /** La preferida primero, igual que al crear una cuenta. */
   const currencyOptions = [
-    defaultCurrency,
-    ...SUGGESTED_CURRENCIES.filter((option) => option !== defaultCurrency),
+    ...new Set([defaultCurrency, primaryCurrency, ...SUGGESTED_CURRENCIES]),
   ];
 
   const create = useMutation({
@@ -807,9 +820,9 @@ function NewDebtSheet({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              {currency === defaultCurrency
+              {currency === primaryCurrency
                 ? "Después no se puede cambiar: los pagos ya registrados quedarían en una moneda que la deuda ya no tiene."
-                : `Los importes y los pagos van en ${currency}. En la posición neta se convierte a ${defaultCurrency} con la última cotización que tengas cargada — si falta, la deuda queda fuera del total y la pantalla lo dice en vez de inventarla. Después no se puede cambiar.`}
+                : `Los importes y los pagos van en ${currency}. En la posición neta se convierte a ${primaryCurrency} con la última cotización que tengas cargada — si falta, la deuda queda fuera del total y la pantalla lo dice en vez de inventarla. Después no se puede cambiar.`}
             </p>
           </div>
 
