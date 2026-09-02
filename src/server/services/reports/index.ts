@@ -93,7 +93,10 @@ export const monthlyReport = async (
 
     const incomeMinor = row?.incomeMinor ?? 0n;
     const expenseMinor = row?.expenseMinor ?? 0n;
-    running += incomeMinor - expenseMinor;
+    // El neto de transferencias solo mueve el ACUMULADO, nunca las columnas:
+    // para los pares reales es cero, y la pata suelta de un préstamo es caja
+    // que se fue (o vino) sin ser gasto ni ingreso.
+    running += incomeMinor - expenseMinor + (row?.transferNetMinor ?? 0n);
 
     points.push({
       month: key,

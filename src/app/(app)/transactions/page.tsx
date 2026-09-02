@@ -6,6 +6,7 @@ import {
   Pencil,
   Search,
   SlidersHorizontal,
+  Trash2,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -30,6 +31,7 @@ import { ApiError } from "@/lib/api-client";
 import {
   useAccounts,
   useCategories,
+  useDeleteTransaction,
   useMembers,
   useTransactions,
   useUpdateTransaction,
@@ -369,6 +371,7 @@ function TransactionDetail({
   onEdit: () => void;
 }) {
   const update = useUpdateTransaction(spaceId);
+  const remove = useDeleteTransaction(spaceId);
 
   return (
     <Drawer
@@ -430,7 +433,9 @@ function TransactionDetail({
 
             {/* Las patas de una transferencia no se editan sueltas: cambiarle
                 el importe a una descuadraría la otra. Se dice en vez de
-                esconder el botón y que parezca un olvido. */}
+                esconder el botón y que parezca un olvido. Una pata SIN
+                contraparte es el desembolso de un préstamo: ajusta el saldo
+                sin ser gasto ni ingreso, y tampoco se edita. */}
             {canEdit &&
               (transaction.transferGroupId === null ? (
                 <Button
@@ -441,10 +446,16 @@ function TransactionDetail({
                   <Pencil className="size-4" />
                   Editar movimiento
                 </Button>
-              ) : (
+              ) : transaction.transferCounterpartAccount !== null ? (
                 <p className="text-xs text-muted-foreground">
                   Esto es una pata de una transferencia y no se edita suelta:
                   cambiarla descuadraría la otra cuenta.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Este movimiento ajusta el saldo sin contar como gasto ni
+                  ingreso (el desembolso de un préstamo). No se edita: si está
+                  mal, eliminalo y anotá el préstamo de nuevo.
                 </p>
               ))}
 
@@ -489,6 +500,43 @@ function TransactionDetail({
               locale={locale}
               canEdit={canEdit}
             />
+
+            {/* Al final y en rojo, como el borrado de una deuda: lo
+                destructivo no convive con lo cotidiano. Una pata de
+                transferencia borra el par entero — borrar una sola
+                descuadraría la otra cuenta. */}
+            {canEdit && (
+              <Button
+                variant="ghost"
+                className="min-h-touch w-full text-expense"
+                disabled={remove.isPending}
+                onClick={() => {
+                  remove.mutate(transaction.id, {
+                    onSuccess: () => {
+                      toast.success("Movimiento eliminado");
+                      onClose();
+                    },
+                    onError: (error: unknown) => {
+                      toast.error(
+                        error instanceof ApiError
+                          ? error.message
+                          : "No se pudo eliminar",
+                      );
+                    },
+                  });
+                }}
+              >
+                {remove.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Trash2 className="size-4" />
+                )}
+                {transaction.transferGroupId !== null &&
+                transaction.transferCounterpartAccount !== null
+                  ? "Eliminar la transferencia entera"
+                  : "Eliminar movimiento"}
+              </Button>
+            )}
           </DrawerBody>
         )}
       </DrawerContent>

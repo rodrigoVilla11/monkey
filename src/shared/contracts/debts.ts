@@ -79,14 +79,30 @@ const base = {
 };
 
 export const createDebtRequestSchema = z
-  .object(base)
+  .object({
+    ...base,
+    /**
+     * Crea además el movimiento del desembolso: la plata que salió de la
+     * cuenta (préstamo dado) o entró en ella (préstamo recibido).
+     *
+     * Se registra como pata suelta de transferencia, no como gasto/ingreso:
+     * ajusta el saldo de la cuenta pero queda fuera de ingresos, gastos y
+     * presupuestos — prestar plata no es gastarla, se recupera después.
+     * Requiere `accountId` y que la cuenta opere en la moneda de la deuda.
+     */
+    createMovement: z.boolean().optional(),
+  })
   .refine(
     (value) => value.dueDate == null || value.dueDate >= value.startDate,
     {
       message: "El vencimiento no puede ser anterior al inicio",
       path: ["dueDate"],
     },
-  );
+  )
+  .refine((value) => value.createMovement !== true || value.accountId != null, {
+    message: "Elegí de qué cuenta sale (o entra) la plata",
+    path: ["accountId"],
+  });
 
 export const updateDebtRequestSchema = z
   .object({

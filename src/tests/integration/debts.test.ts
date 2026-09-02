@@ -15,6 +15,7 @@ import {
 } from "@/server/services/debts";
 import { createRate } from "@/server/services/rates/manage";
 import { monthlyReport } from "@/server/services/reports";
+import { todayIn } from "@/shared/dates";
 
 import { disconnect, resetDatabase, testDb } from "./helpers/db";
 
@@ -100,12 +101,14 @@ const addRate = (base: string, quote: string, rate: string) =>
     }),
   );
 
+const ACTOR = { userId: null, name: "Rodrigo" };
+
 const addDebt = (
   space: Space,
   over: Record<string, unknown> = {},
 ): Promise<string> =>
   systemClient().$transaction(async (tx) =>
-    createDebt(forSpace(space.spaceId), tx, context(space), {
+    createDebt(forSpace(space.spaceId), tx, context(space), ACTOR, {
       direction: "OWED_BY_ME",
       counterparty: "Mi hermano",
       originalAmountMinor: "500000",
@@ -335,6 +338,97 @@ describe("un pago no es un movimiento", () => {
       where: { spaceId: space.spaceId },
     });
     expect(count).toBe(0);
+  });
+});
+
+describe("el desembolso al crear la deuda", () => {
+  it("saca la plata de la cuenta sin contarla como gasto", async () => {
+    const space = await makeSpace();
+
+    await addDebt(space, {
+      direction: "OWED_TO_ME",
+      counterparty: "Juan",
+      accountId: space.accountId,
+      createMovement: true,
+    });
+
+    const balances = await accountBalances(forSpace(space.spaceId));
+    expect(balances.get(space.accountId)?.balanceMinor).toBe(500_000n);
+
+    // No es un gasto: es una pata suelta de transferencia, sin categoría.
+    const movement = await testDb.transaction.findFirstOrThrow({
+      where: { spaceId: space.spaceId },
+    });
+    expect(movement.type).toBe("TRANSFER");
+    expect(movement.transferDirection).toBe("OUT");
+    expect(movement.categoryId).toBeNull();
+    expect(movement.description).toBe("Préstamo a Juan");
+  });
+
+  it("un préstamo recibido entra en la cuenta sin ser un ingreso", async () => {
+    const space = await makeSpace();
+
+    await addDebt(space, {
+      accountId: space.accountId,
+      createMovement: true,
+    });
+
+    const balances = await accountBalances(forSpace(space.spaceId));
+    expect(balances.get(space.accountId)?.balanceMinor).toBe(1_500_000n);
+
+    const movement = await testDb.transaction.findFirstOrThrow({
+      where: { spaceId: space.spaceId },
+    });
+    expect(movement.transferDirection).toBe("IN");
+    expect(movement.description).toBe("Préstamo de Mi hermano");
+  });
+
+  it("mueve la caja de los reportes sin tocar el gasto del mes", async () => {
+    const space = await makeSpace();
+
+    const before = await monthlyReport(context(space), "es-ES", TIMEZONE, 1);
+    await addDebt(space, {
+      direction: "OWED_TO_ME",
+      accountId: space.accountId,
+      createMovement: true,
+      startDate: todayIn(TIMEZONE),
+    });
+    const after = await monthlyReport(context(space), "es-ES", TIMEZONE, 1);
+
+    const lastBefore = before.points.at(-1);
+    const lastAfter = after.points.at(-1);
+
+    // Prestar plata no es gastarla…
+    expect(lastAfter?.expense.amountMinor).toBe(
+      lastBefore?.expense.amountMinor,
+    );
+    // …pero la caja sí bajó, y la curva tiene que decirlo.
+    expect(lastAfter?.runningBalance.amountMinor).toBe(
+      String(BigInt(lastBefore?.runningBalance.amountMinor ?? "0") - 500_000n),
+    );
+  });
+
+  it("sin el flag no crea ningún movimiento, como siempre", async () => {
+    const space = await makeSpace();
+
+    await addDebt(space, { accountId: space.accountId });
+
+    const count = await testDb.transaction.count({
+      where: { spaceId: space.spaceId },
+    });
+    expect(count).toBe(0);
+  });
+
+  it("rechaza una cuenta en otra moneda: no inventa conversiones", async () => {
+    const space = await makeSpace();
+
+    await expect(
+      addDebt(space, {
+        currency: "ARS",
+        accountId: space.accountId,
+        createMovement: true,
+      }),
+    ).rejects.toThrow(/coincidir/);
   });
 });
 

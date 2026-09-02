@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { errors } from "@/server/api/errors";
 import type { ScopedDb } from "@/server/db/scoped";
 import { accountBalances } from "@/server/services/balances";
@@ -48,9 +50,12 @@ import {
  * recibo del banco —convenciones de días, comisiones, seguros, redondeos— y un
  * número casi correcto en finanzas es peor que ninguno.
  *
- * **No crea movimientos.** Un pago se vincula a uno que ya existe o se registra
- * suelto, igual que los aportes a metas. Si el pago generara un gasto, cargarlo
- * desde acá y desde la pantalla de movimientos lo contaría dos veces.
+ * **Los pagos no crean movimientos.** Un pago se vincula a uno que ya existe o
+ * se registra suelto, igual que los aportes a metas. Si el pago generara un
+ * gasto, cargarlo desde acá y desde la pantalla de movimientos lo contaría dos
+ * veces. La única excepción es el DESEMBOLSO al crear la deuda, que es opt-in
+ * (`createMovement`) y va como pata suelta de transferencia: mueve el saldo de
+ * la cuenta sin contar como gasto ni ingreso. Ver `createDisbursement`.
  *
  * ── Sobre el patrimonio ─────────────────────────────────────────────────────
  *
@@ -344,18 +349,20 @@ interface SpaceContext {
 const validateAccount = async (
   db: ScopedDb,
   accountId: string | null | undefined,
-): Promise<void> => {
-  if (accountId == null) return;
+): Promise<{ currency: string } | null> => {
+  if (accountId == null) return null;
 
   const account = await db.account.findFirst({
     where: { id: accountId },
-    select: { isArchived: true },
+    select: { isArchived: true, currency: true },
   });
 
   if (account === null) throw errors.notFound("No se encontró la cuenta");
   if (account.isArchived) {
     throw errors.conflict("CONFLICT", "Esa cuenta está archivada");
   }
+
+  return { currency: account.currency };
 };
 
 /**
@@ -388,13 +395,20 @@ const planColumns = (
         planStartDate: fromCalendarDate(plan.startDate),
       };
 
+interface Actor {
+  readonly userId: string | null;
+  readonly name: string;
+}
+
 export const createDebt = async (
   db: ScopedDb,
   tx: TransactionClient,
   space: SpaceContext,
+  actor: Actor,
   input: CreateDebtRequest,
 ): Promise<string> => {
-  await validateAccount(db, input.accountId);
+  const account = await validateAccount(db, input.accountId);
+  const currency = input.currency ?? space.primaryCurrency;
 
   const created = await tx.debt.create({
     data: {
@@ -404,7 +418,7 @@ export const createDebt = async (
       counterparty: input.counterparty,
       description: input.description ?? null,
       originalAmountMinor: BigInt(input.originalAmountMinor),
-      currency: input.currency ?? space.primaryCurrency,
+      currency,
       interestRateBps: input.interestRateBps ?? null,
       startDate: fromCalendarDate(input.startDate),
       dueDate: input.dueDate == null ? null : fromCalendarDate(input.dueDate),
@@ -414,7 +428,130 @@ export const createDebt = async (
     select: { id: true },
   });
 
+  if (input.createMovement === true) {
+    // El schema exige accountId cuando createMovement viene en true, así que
+    // acá `account` ya pasó por validateAccount.
+    if (input.accountId == null || account === null) {
+      throw errors.notFound("No se encontró la cuenta");
+    }
+
+    await createDisbursement(tx, space, actor, {
+      accountId: input.accountId,
+      accountCurrency: account.currency,
+      direction: input.direction,
+      counterparty: input.counterparty,
+      amountMinor: BigInt(input.originalAmountMinor),
+      currency,
+      date: input.startDate,
+    });
+  }
+
   return created.id;
+};
+
+/**
+ * El movimiento del desembolso: la plata que salió (o entró) de verdad.
+ *
+ * Va como pata SUELTA de transferencia y no como gasto/ingreso a propósito:
+ * mueve el saldo de la cuenta pero queda fuera de ingresos, gastos y
+ * presupuestos — prestar plata no es gastarla, es moverla a "me la deben".
+ * La contrapartida es la deuda misma, que la posición neta ya suma como por
+ * cobrar/por pagar. No rompe el neto-cero de las transferencias reales: esas
+ * siguen naciendo de a dos por su propio módulo; esta pata dice exactamente
+ * lo que pasó — la caja bajó (o subió) sin que fuera un gasto ni un ingreso.
+ *
+ * Una vez creado, el movimiento vive su vida: borrar la deuda no lo toca
+ * (es plata que se movió de verdad) y se elimina desde la pantalla de
+ * movimientos como cualquier otro.
+ */
+const createDisbursement = async (
+  tx: TransactionClient,
+  space: SpaceContext,
+  actor: Actor,
+  input: {
+    readonly accountId: string;
+    readonly accountCurrency: string;
+    readonly direction: DebtDirection;
+    readonly counterparty: string;
+    readonly amountMinor: bigint;
+    readonly currency: string;
+    readonly date: CalendarDate;
+  },
+): Promise<void> => {
+  /**
+   * El movimiento vive en la moneda de su cuenta. Si la deuda está en otra,
+   * convertir acá inventaría un importe: se pide que coincidan y listo.
+   */
+  if (input.accountCurrency !== input.currency) {
+    throw errors.conflict(
+      "UNPROCESSABLE",
+      `La cuenta está en ${input.accountCurrency} y la deuda en ${input.currency}: para mover la plata tienen que coincidir`,
+    );
+  }
+
+  /**
+   * Conversión congelada a la moneda primaria, igual que cualquier movimiento:
+   * sin ella la curva de patrimonio no podría sumar esta pata.
+   */
+  let conversion: { rate: string; amountPrimaryMinor: bigint } | null = null;
+
+  if (input.currency !== space.primaryCurrency) {
+    const found = await getRateProvider().find(
+      input.currency,
+      space.primaryCurrency,
+      input.date,
+    );
+    if (found === null) {
+      throw errors.conflict(
+        "UNPROCESSABLE",
+        `No hay cotización de ${input.currency} a ${space.primaryCurrency}. Cargá una en Ajustes → Cotizaciones`,
+      );
+    }
+
+    const converted = convert(
+      toMoney(input.amountMinor, input.currency),
+      found.rate,
+      space.primaryCurrency,
+    );
+    if (!converted.ok) {
+      throw errors.conflict("UNPROCESSABLE", "El tipo de cambio no es válido");
+    }
+
+    conversion = {
+      rate: found.rate,
+      amountPrimaryMinor: converted.value.amountMinor,
+    };
+  }
+
+  await tx.transaction.create({
+    data: {
+      spaceId: space.spaceId,
+      accountId: input.accountId,
+      categoryId: null,
+      createdByUserId: actor.userId,
+      createdByName: actor.name,
+      type: "TRANSFER",
+      status: "CLEARED",
+      amountMinor: input.amountMinor,
+      currency: input.currency,
+      date: fromCalendarDate(input.date),
+      description:
+        input.direction === "OWED_TO_ME"
+          ? `Préstamo a ${input.counterparty}`
+          : `Préstamo de ${input.counterparty}`,
+      // El grupo con una sola pata es deliberado: la "otra pata" no es una
+      // cuenta propia, es la contraparte de la deuda.
+      transferGroupId: randomUUID(),
+      transferDirection: input.direction === "OWED_TO_ME" ? "OUT" : "IN",
+      ...(conversion !== null
+        ? {
+            exchangeRateSnapshot: conversion.rate,
+            amountPrimaryMinor: conversion.amountPrimaryMinor,
+          }
+        : {}),
+    },
+    select: { id: true },
+  });
 };
 
 export const updateDebt = async (

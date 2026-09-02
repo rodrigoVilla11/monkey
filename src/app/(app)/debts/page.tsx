@@ -25,6 +25,7 @@ import {
   minorToInput,
   toMinor,
 } from "@/lib/format";
+import { useAccounts } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -679,6 +680,7 @@ function NewDebtSheet({
   const queryClient = useQueryClient();
   const session = useSession();
   const timezone = session.data?.timezone ?? "Europe/Madrid";
+  const accounts = useAccounts(spaceId);
 
   const [direction, setDirection] =
     useState<(typeof DEBT_DIRECTIONS)[number]>("OWED_BY_ME");
@@ -689,6 +691,21 @@ function NewDebtSheet({
   const [dueDate, setDueDate] = useState("");
   const [installments, setInstallments] = useState("");
   const [plan, setPlan] = useState<PlanDraft | null>(null);
+  const [moveMoney, setMoveMoney] = useState(false);
+  const [accountId, setAccountId] = useState<string | null>(null);
+
+  /**
+   * El movimiento vive en la moneda de su cuenta, así que solo se ofrecen las
+   * que coinciden con la de la deuda. La elegida se valida contra esta lista
+   * al guardar: cambiar la moneda con una cuenta ya marcada no manda una que
+   * no corresponde.
+   */
+  const eligibleAccounts = (accounts.data ?? []).filter(
+    (account) => !account.isArchived && account.currency === currency,
+  );
+  const selectedAccountOk =
+    accountId !== null &&
+    eligibleAccounts.some((account) => account.id === accountId);
 
   /** La preferida primero, igual que al crear una cuenta. */
   const currencyOptions = [
@@ -711,9 +728,16 @@ function NewDebtSheet({
           ? { installmentsTotal: Number(installments) }
           : {}),
         plan: planPayload(plan, currency),
+        ...(moveMoney && selectedAccountOk
+          ? { accountId, createMovement: true }
+          : {}),
       }),
     onSuccess: async () => {
-      toast.success("Deuda anotada");
+      toast.success(
+        moveMoney && selectedAccountOk
+          ? "Deuda anotada y movimiento creado"
+          : "Deuda anotada",
+      );
       setCounterparty("");
       setAmount("");
       setCurrency(defaultCurrency);
@@ -721,6 +745,8 @@ function NewDebtSheet({
       setDueDate("");
       setInstallments("");
       setPlan(null);
+      setMoveMoney(false);
+      setAccountId(null);
       onOpenChange(false);
       await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
     },
@@ -736,6 +762,7 @@ function NewDebtSheet({
     /^\d+([.,]\d+)?$/.test(amount) &&
     Number(amount.replace(",", ".")) > 0 &&
     planIsValid(plan) &&
+    (!moveMoney || selectedAccountOk) &&
     !create.isPending;
 
   return (
@@ -824,6 +851,61 @@ function NewDebtSheet({
                 ? "Después no se puede cambiar: los pagos ya registrados quedarían en una moneda que la deuda ya no tiene."
                 : `Los importes y los pagos van en ${currency}. En la posición neta se convierte a ${primaryCurrency} con la última cotización que tengas cargada — si falta, la deuda queda fuera del total y la pantalla lo dice en vez de inventarla. Después no se puede cambiar.`}
             </p>
+          </div>
+
+          {/**
+           * El desembolso: la plata que salió (o entró) de verdad. Es opt-in
+           * porque hay deudas que se anotan después de que la plata ya se
+           * movió — crear siempre el movimiento la contaría dos veces.
+           */}
+          <div className="space-y-3 rounded-xl border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label htmlFor="debt-move">
+                  {direction === "OWED_TO_ME"
+                    ? "Sacar la plata de una cuenta"
+                    : "Ingresar la plata en una cuenta"}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {direction === "OWED_TO_ME"
+                    ? "Ajusta el saldo sin contar como gasto: es plata que vas a recuperar."
+                    : "Ajusta el saldo sin contar como ingreso: es plata que vas a devolver."}
+                </p>
+              </div>
+              <Switch
+                id="debt-move"
+                checked={moveMoney}
+                onCheckedChange={setMoveMoney}
+              />
+            </div>
+
+            {moveMoney &&
+              (eligibleAccounts.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No tenés ninguna cuenta activa en {currency}. El movimiento
+                  vive en la moneda de su cuenta: cambiá la moneda de la deuda o
+                  creá una cuenta en {currency}.
+                </p>
+              ) : (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {eligibleAccounts.map((account) => (
+                    <button
+                      key={account.id}
+                      type="button"
+                      onClick={() => {
+                        setAccountId(account.id);
+                      }}
+                      aria-pressed={account.id === accountId}
+                      className={cn(
+                        "min-h-touch shrink-0 rounded-xl border px-3 py-2 text-sm",
+                        account.id === accountId && "ring-2 ring-primary",
+                      )}
+                    >
+                      {account.name}
+                    </button>
+                  ))}
+                </div>
+              ))}
           </div>
 
           <div className="space-y-1.5">

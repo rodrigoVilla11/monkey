@@ -209,6 +209,14 @@ export const materializeDueRules = async (
         );
       }
     }
+
+    /**
+     * Con `ruleId` la corrida es de UNA regla y no hay segunda página. Dejar
+     * girar el cursor sería un bug: el `id: { gt: cursor }` de la vuelta
+     * siguiente PISARÍA el `id: ruleId` del where —dos spreads sobre la misma
+     * clave— y la corrida acotada terminaría materializando las demás reglas.
+     */
+    if (options.ruleId !== undefined) break;
   }
 
   return {

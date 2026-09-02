@@ -25,14 +25,24 @@ export interface MonthlyRow {
   readonly month: string;
   readonly incomeMinor: bigint;
   readonly expenseMinor: bigint;
+  /**
+   * Neto de transferencias del mes, con signo. Un par de patas se cancela y da
+   * cero; una pata suelta —el desembolso de un préstamo— mueve la caja y tiene
+   * que mover el acumulado. Nunca entra en ingresos ni egresos.
+   */
+  readonly transferNetMinor: bigint;
   readonly transactionCount: number;
 }
 
 /**
  * Serie mensual de ingresos y egresos.
  *
- * Las TRANSFERENCIAS quedan fuera: mover plata entre cuentas propias no es ni
- * ingreso ni gasto, y contarlas infla las dos columnas.
+ * Las TRANSFERENCIAS quedan fuera de las dos columnas: mover plata entre
+ * cuentas propias no es ni ingreso ni gasto, y contarlas infla las dos. Pero
+ * SÍ entran al neto de transferencias, con signo, para que el acumulado de
+ * caja no se pierda una pata suelta —el desembolso de un préstamo—: un par
+ * real vale lo mismo en primaria a los dos lados y da cero por construcción,
+ * así que para las transferencias de verdad esta columna no cambia nada.
  *
  * Los meses sin movimientos NO aparecen: los rellena el service, que es donde
  * se sabe qué rango se pidió. Un `generate_series` acá ataría el SQL al
@@ -48,6 +58,7 @@ export const monthlyTotals = async (
       month: string;
       income: bigint | null;
       expense: bigint | null;
+      transfer_net: bigint | null;
       count: bigint;
     }[]
   >(Prisma.sql`
@@ -62,11 +73,19 @@ export const monthlyTotals = async (
         FILTER (WHERE "type" = 'INCOME'))::bigint  AS income,
       (SUM(COALESCE("amountPrimaryMinor", "amountMinor"))
         FILTER (WHERE "type" = 'EXPENSE'))::bigint AS expense,
-      COUNT(*) AS count
+      (SUM(CASE
+        WHEN "type" = 'TRANSFER' AND "transferDirection" = 'IN'
+          THEN  COALESCE("amountPrimaryMinor", "amountMinor")
+        WHEN "type" = 'TRANSFER' AND "transferDirection" = 'OUT'
+          THEN -COALESCE("amountPrimaryMinor", "amountMinor")
+        ELSE 0
+      END))::bigint AS transfer_net,
+      -- Solo ingresos y gastos: las transferencias no cuentan como actividad
+      -- del mes, igual que antes de que existiera la columna de arriba.
+      COUNT(*) FILTER (WHERE "type" IN ('INCOME', 'EXPENSE')) AS count
     FROM "Transaction"
     WHERE "spaceId" = ${spaceId}
       AND "deletedAt" IS NULL
-      AND "type" IN ('INCOME', 'EXPENSE')
       AND "date" >= ${from}
       AND "date" <= ${to}
     GROUP BY 1
@@ -77,6 +96,7 @@ export const monthlyTotals = async (
     month: row.month,
     incomeMinor: row.income ?? 0n,
     expenseMinor: row.expense ?? 0n,
+    transferNetMinor: row.transfer_net ?? 0n,
     transactionCount: Number(row.count),
   }));
 };

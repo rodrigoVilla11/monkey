@@ -35,7 +35,7 @@ export const POST = route<CreateDebtRequest, Params>(
     params: paramsSchema,
     space: { minRole: "MEMBER" },
   },
-  async ({ body, access, db, logger }) => {
+  async ({ body, access, session, db, logger }) => {
     const space = await systemClient().space.findUniqueOrThrow({
       where: { id: access.spaceId },
       select: { primaryCurrency: true, timezone: true },
@@ -46,6 +46,9 @@ export const POST = route<CreateDebtRequest, Params>(
         db,
         tx,
         { spaceId: access.spaceId, primaryCurrency: space.primaryCurrency },
+        // Quién anota: si pide el movimiento del desembolso, la transacción
+        // nace con su autor, como cualquier otra.
+        { userId: access.userId, name: session.name },
         body,
       ),
     );
