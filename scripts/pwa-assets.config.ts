@@ -14,28 +14,24 @@ export const BRAND = {
    * `--background` del tema oscuro, en el manifest y en el themeColor.
    */
   background: "#0d1117",
-  /**
-   * Placa de los íconos. Blanca porque el logo está diseñado sobre blanco:
-   * los "blancos" del PNG son transparencia, y sobre oscuro los trazos azul
-   * oscuro del mono se apagan.
-   */
-  tile: "#ffffff",
 } as const;
 
 /**
- * La marca: el logo de Mon Key (mono + llave), como PNG con transparencia.
+ * La marca: el ícono de monKey, como SVG cuadrado a sangre completa (placa
+ * azul en degradé + la cara del mono).
  *
- * El original vive en `public/logo/` tal como lo entregó el diseño; esta es
- * una copia con nombre sin espacios para poder referenciarla por URL. De acá
- * la leen tanto el generador de íconos como el componente `MonkeyMark`: una
- * sola fuente, así el ícono instalado y el logo de adentro de la app no se
- * separan nunca.
+ * Es un redibujo simplificado del logo original (mono + K + llave + $ dentro
+ * de un anillo), que sigue en `public/logo/` tal como lo entregó el diseño.
+ * Aquel no servía de ícono de iPhone: un círculo adentro del cuadrado
+ * redondeado, con detalle que a 60pt se empasta. De acá leen tanto el
+ * generador de íconos como el componente `MonkeyMark`: una sola fuente, así
+ * el ícono instalado y el logo de adentro de la app no se separan nunca.
  *
- * Paleta del logo: azul brillante #2691e2 (anillo), azul oscuro #2475b2
- * (trazos), naranja #ec9a33 (llave, ojo y $). Los tokens de la app en
- * `globals.css` derivan de estos tres.
+ * Paleta del logo original: azul brillante #2691e2, azul oscuro #2475b2 y
+ * naranja #ec9a33 (el ojo). Los tokens de la app en `globals.css` derivan de
+ * estos tres; el degradé de la placa y el azul marino del mono, también.
  */
-export const LOGO_PUBLIC_PATH = "/logo/monkey.png";
+export const LOGO_PUBLIC_PATH = "/logo/monkey.svg";
 
 /**
  * El eslogan de la marca. Vive acá por la misma razón que el logo: lo dibujan
@@ -43,14 +39,6 @@ export const LOGO_PUBLIC_PATH = "/logo/monkey.png";
  * app, y dos copias se desincronizan solas.
  */
 export const TAGLINE = "Your key to smart money";
-
-/**
- * Fracción del ancho del PNG que ocupa el círculo visible del logo (medida
- * sobre el archivo: el anillo llega a ~78% del canvas de 400px). La usa el
- * generador para calcular cuánto escalar sin que Android recorte el anillo
- * en los íconos maskable.
- */
-export const LOGO_CIRCLE_RATIO = 0.78;
 
 /**
  * Pantallas de arranque de iOS.

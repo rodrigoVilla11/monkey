@@ -70,7 +70,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
 /**
  * Pantalla de carga del arranque: la MISMA marca que la splash del sistema
- * (logo sobre disco blanco, nombre y eslogan), así el pasaje splash → app no
+ * (ícono, nombre y eslogan), así el pasaje splash → app no
  * salta de un logo a cajas grises. El pulso es la única señal de "cargando":
  * a esta altura no hay layout que valga la pena esqueletar, todavía no se
  * sabe ni a qué pantalla se entra.

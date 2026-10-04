@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    Ícono de monKey, a sangre completa: sin esquinas redondeadas ni
+    transparencia, porque iOS y Android le aplican su propia máscara.
+    El mono entero entra en el círculo central del 80% (la zona segura de
+    los íconos maskable), así que el mismo dibujo sirve para todo.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3fa6f2"/>
+      <stop offset="1" stop-color="#1c66aa"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#tile)"/>
+  <g transform="translate(40.96 58) scale(0.92)">
+    <!-- Orejas -->
+    <circle cx="212" cy="500" r="104" fill="#113d68"/>
+    <circle cx="812" cy="500" r="104" fill="#113d68"/>
+    <circle cx="204" cy="500" r="52" fill="#ffffff"/>
+    <circle cx="820" cy="500" r="52" fill="#ffffff"/>
+    <!-- Cabeza y mechón -->
+    <ellipse cx="512" cy="520" rx="276" ry="258" fill="#113d68"/>
+    <path d="M452 286 C462 232 486 200 516 182 C510 212 514 232 526 248 C540 224 562 208 588 202 C574 228 570 254 576 286 Z" fill="#113d68"/>
+    <!-- Cara -->
+    <circle cx="412" cy="470" r="112" fill="#ffffff"/>
+    <circle cx="612" cy="470" r="112" fill="#ffffff"/>
+    <ellipse cx="512" cy="606" rx="196" ry="132" fill="#ffffff"/>
+    <!-- Guiño y ojo naranja, como en el logo original -->
+    <path d="M366 486 Q412 430 458 486" fill="none" stroke="#113d68" stroke-width="24" stroke-linecap="round"/>
+    <circle cx="612" cy="470" r="48" fill="#ec9a33"/>
+    <circle cx="630" cy="452" r="15" fill="#ffffff"/>
+    <!-- Nariz y sonrisa -->
+    <circle cx="488" cy="574" r="10" fill="#113d68"/>
+    <circle cx="536" cy="574" r="10" fill="#113d68"/>
+    <path d="M410 634 Q512 728 614 634" fill="none" stroke="#113d68" stroke-width="26" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -12,48 +12,29 @@ import { cn } from "@/lib/utils";
  * adentro de la app y el del springboard del iPhone se irían separando con
  * cada retoque y nadie se enteraría hasta ver los dos juntos.
  *
- * `unoptimized` a propósito: es un PNG chico de `public/`, no necesita pasar
- * por el optimizador de Next (que en el runtime de Docker pediría sharp).
+ * El SVG ya trae su placa azul a sangre completa; acá solo se le redondean
+ * las esquinas, como hace iOS con el ícono instalado.
+ *
+ * `unoptimized` a propósito: es un SVG de `public/`, no tiene nada que ganar
+ * en el optimizador de Next (que en el runtime de Docker pediría sharp).
  */
 export function MonkeyMark({
   className,
   size = 48,
-  framed = false,
 }: {
   className?: string;
   /** Tamaño en píxeles al que se va a ver. */
   size?: number;
-  /** Con la placa blanca de fondo y las esquinas redondeadas, como el ícono. */
-  framed?: boolean;
 }) {
-  const mark = (
+  return (
     <Image
       src={LOGO_PUBLIC_PATH}
       alt=""
       width={size}
       height={size}
       unoptimized
-      className={cn(framed ? "size-[82%]" : className)}
+      className={cn("rounded-[22%]", className)}
     />
-  );
-
-  if (!framed) return mark;
-
-  /**
-   * La placa es blanca en los dos temas, igual que el ícono instalado: los
-   * "blancos" del logo son transparencia, y sobre fondo oscuro los trazos
-   * azul oscuro del mono se apagarían sin ella.
-   */
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center justify-center rounded-[22%]",
-        "bg-white ring-1 ring-black/10 dark:ring-white/10",
-        className,
-      )}
-    >
-      {mark}
-    </span>
   );
 }
 
@@ -86,7 +67,7 @@ export function Wordmark({ className }: { className?: string }) {
 export function BrandLockup({ className }: { className?: string }) {
   return (
     <span className={cn("flex flex-col items-center gap-3", className)}>
-      <MonkeyMark size={64} framed className="size-16 shadow-lg" />
+      <MonkeyMark size={64} className="size-16 shadow-lg" />
       <span className="flex flex-col items-center gap-1">
         <Wordmark className="text-2xl" />
         <span className="text-sm text-muted-foreground">{TAGLINE}</span>
