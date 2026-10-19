@@ -5,6 +5,7 @@ import { json } from "@/server/api/responses";
 import { systemClient } from "@/server/db/system";
 import { categoryReport, defaultRange } from "@/server/services/reports";
 import { categoryReportQuerySchema } from "@/shared/contracts/reports-v2";
+import { rangeFromQuery } from "@/shared/periods";
 
 export const runtime = "nodejs";
 
@@ -27,14 +28,14 @@ export const GET = route<undefined, Params>(
       select: { primaryCurrency: true },
     });
 
-    const fallback = defaultRange(session.timezone);
+    const range = rangeFromQuery(params, () => defaultRange(session.timezone));
 
     return json(
       await categoryReport(
         db,
         { spaceId: access.spaceId, primaryCurrency: space.primaryCurrency },
-        params.from ?? fallback.from,
-        params.to ?? fallback.to,
+        range.start,
+        range.end,
         params.kind,
       ),
     );

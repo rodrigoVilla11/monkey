@@ -49,6 +49,27 @@ export const isNegative = (value: MoneyDTO): boolean =>
   BigInt(value.amountMinor) < 0n;
 
 /**
+ * Porcentaje con el mismo separador y el mismo signo que los importes de al
+ * lado: "45,5 %" en es-ES, "+12,5 %" si se pide el signo. Mezclar un "−"
+ * unicode con el "-" de Intl en la misma fila se nota.
+ */
+export const formatPercent = (
+  value: number,
+  locale: string,
+  options?: { signDisplay?: "auto" | "always" | "never" },
+): string => {
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "percent",
+      maximumFractionDigits: 1,
+      signDisplay: options?.signDisplay ?? "auto",
+    }).format(value / 100);
+  } catch {
+    return `${String(value)}%`;
+  }
+};
+
+/**
  * Encabezado de un grupo de días en el listado.
  * "Hoy" y "Ayer" en vez de la fecha: es lo que uno busca al abrir la app.
  */

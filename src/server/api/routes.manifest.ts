@@ -655,7 +655,7 @@ export const ROUTES: readonly RouteSpec[] = [
     path: "/api/v1/spaces/[spaceId]/reports/monthly",
     auth: "verified",
     minRole: "VIEWER",
-    note: "Evolución mensual y cash flow: misma serie, dos lecturas",
+    note: "Serie y cash flow con rango y corte día/semana/mes. Desde 2026-10 los puntos llevan `key` (antes `month`) y `best`/`worst` (antes `bestMonth`/`worstMonth`); `?months=` sigue dando puntos mensuales",
   },
   {
     method: "GET",
@@ -668,6 +668,7 @@ export const ROUTES: readonly RouteSpec[] = [
     path: "/api/v1/spaces/[spaceId]/reports/comparison",
     auth: "verified",
     minRole: "VIEWER",
+    note: "Período contra el anterior o contra el mismo del año pasado. Desde 2026-10 devuelve `current`/`previous` como rangos (antes `currentMonth`/`previousMonth`)",
   },
   {
     method: "GET",

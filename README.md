@@ -17,7 +17,7 @@ It is a project I built for my own use and keep developing. Deployment target is
 - **Expense splitting and settlements.** A split is an annotation on a transaction, not a debt row. Balances between members are aggregated on read and the app suggests the minimal set of payments to settle up.
 - **Recurring rules materialized by a cron job.** Rent on the 1st, salary on the last Friday. Missed occurrences are backfilled with their real dates; the job is idempotent at the database level.
 - **Savings goals and debts.** Goals track contributions (optionally linked to real transfers) and show reserved vs. available balance per account. Debts record what was agreed and what was paid; no amortization guessing.
-- **Reports, CSV import/export, audit log.** Monthly series, category and member breakdowns, month-over-month comparison. CSV import previews with the same code path that writes. Membership changes and destructive actions are audited inside the same transaction as the change.
+- **Reports, CSV import/export, audit log.** One period for the whole screen — a month, a preset such as the last 3 months or this year, or any custom range — with previous/next navigation. The series picks its bucket from the range length (daily up to a month, weekly up to ~4 months, monthly beyond) and lets you override it; category and member breakdowns with budget vs. actual and a jump to the filtered transaction list; a comparison of the period against the one just before it or against the same period last year. Period and tab live in the URL. CSV import previews with the same code path that writes. Membership changes and destructive actions are audited inside the same transaction as the change.
 
 ## Architecture
 

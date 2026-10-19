@@ -20,9 +20,12 @@ import type { CategoryBreakdownItem } from "@/shared/contracts/reports";
 export function CategoryDonut({
   data,
   locale,
+  legend = true,
 }: {
   data: readonly CategoryBreakdownItem[];
   locale: string;
+  /** Sin leyenda cuando el detalle ya está en una lista propia debajo. */
+  legend?: boolean;
 }) {
   const slices = data.map((item) => ({
     name: item.name,
@@ -53,27 +56,29 @@ export function CategoryDonut({
         </ResponsiveContainer>
       </div>
 
-      <ul className="space-y-1.5">
-        {data.map((item) => (
-          <li
-            key={item.categoryId ?? item.name}
-            className="flex items-center gap-2 text-sm"
-          >
-            <span
-              className="size-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: item.color ?? "#71717a" }}
-              aria-hidden
-            />
-            <span className="min-w-0 flex-1 truncate">{item.name}</span>
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {item.percentage}%
-            </span>
-            <span className="shrink-0 text-sm font-medium tabular-nums">
-              {formatMoneyDTO(item.total, locale)}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {legend && (
+        <ul className="space-y-1.5">
+          {data.map((item) => (
+            <li
+              key={item.categoryId ?? item.name}
+              className="flex items-center gap-2 text-sm"
+            >
+              <span
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: item.color ?? "#71717a" }}
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1 truncate">{item.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                {item.percentage}%
+              </span>
+              <span className="shrink-0 text-sm font-medium tabular-nums">
+                {formatMoneyDTO(item.total, locale)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

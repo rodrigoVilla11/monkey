@@ -220,7 +220,15 @@ const withStatus = async (
 export const listBudgets = async (
   db: ScopedDb,
   viewerTimezone: string,
-  options: { readonly includeInactive?: boolean } = {},
+  options: {
+    readonly includeInactive?: boolean;
+    /**
+     * Calcular el estado como si hoy fuera este día. Es lo que permite ver
+     * "presupuesto vs. real" de un mes ya cerrado: el período que contenía
+     * esa fecha, con el gasto que hubo entonces.
+     */
+    readonly asOf?: CalendarDate;
+  } = {},
 ): Promise<BudgetWithStatus[]> => {
   const rows = await db.budget.findMany({
     where: options.includeInactive === true ? {} : { isActive: true },
@@ -230,7 +238,7 @@ export const listBudgets = async (
 
   // "Hoy" en la timezone de quien mira: el 1 de mes a las 00:30 en Madrid, un
   // server en UTC mostraría todavía el período anterior.
-  const today = todayIn(viewerTimezone);
+  const today = options.asOf ?? todayIn(viewerTimezone);
 
   // Secuencial y no en paralelo: cada presupuesto hace 3 consultas y una
   // ráfaga de 20 presupuestos × 3 saturaría el pool de conexiones.

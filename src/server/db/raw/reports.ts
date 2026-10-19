@@ -31,7 +31,10 @@ export interface MonthlyRow {
    * que mover el acumulado. Nunca entra en ingresos ni egresos.
    */
   readonly transferNetMinor: bigint;
+  /** Ingresos y gastos. */
   readonly transactionCount: number;
+  /** Patas de transferencia: no son actividad del resultado, pero mueven la caja. */
+  readonly transferCount: number;
 }
 
 /**
@@ -60,6 +63,7 @@ export const monthlyTotals = async (
       expense: bigint | null;
       transfer_net: bigint | null;
       count: bigint;
+      transfer_count: bigint;
     }[]
   >(Prisma.sql`
     SELECT
@@ -82,7 +86,8 @@ export const monthlyTotals = async (
       END))::bigint AS transfer_net,
       -- Solo ingresos y gastos: las transferencias no cuentan como actividad
       -- del mes, igual que antes de que existiera la columna de arriba.
-      COUNT(*) FILTER (WHERE "type" IN ('INCOME', 'EXPENSE')) AS count
+      COUNT(*) FILTER (WHERE "type" IN ('INCOME', 'EXPENSE')) AS count,
+      COUNT(*) FILTER (WHERE "type" = 'TRANSFER') AS transfer_count
     FROM "Transaction"
     WHERE "spaceId" = ${spaceId}
       AND "deletedAt" IS NULL
@@ -98,6 +103,76 @@ export const monthlyTotals = async (
     expenseMinor: row.expense ?? 0n,
     transferNetMinor: row.transfer_net ?? 0n,
     transactionCount: Number(row.count),
+    transferCount: Number(row.transfer_count),
+  }));
+};
+
+export interface DailyRow {
+  /** "YYYY-MM-DD". */
+  readonly day: string;
+  readonly incomeMinor: bigint;
+  readonly expenseMinor: bigint;
+  readonly transferNetMinor: bigint;
+  readonly transactionCount: number;
+  readonly transferCount: number;
+}
+
+/**
+ * Lo mismo que `monthlyTotals`, por día.
+ *
+ * Alimenta los cortes por día y por semana de la serie. La semana se arma en
+ * el service y no acá con `date_trunc('week')` por una razón: en Postgres la
+ * semana empieza siempre en lunes y la del usuario empieza donde él diga
+ * (`User.weekStartsOn`). Agrupar por día deja esa decisión fuera del SQL.
+ *
+ * Los días sin movimientos tampoco aparecen: los rellena el service.
+ */
+export const dailyTotals = async (
+  spaceId: string,
+  from: Date,
+  to: Date,
+): Promise<DailyRow[]> => {
+  const rows = await prisma.$queryRaw<
+    {
+      day: string;
+      income: bigint | null;
+      expense: bigint | null;
+      transfer_net: bigint | null;
+      count: bigint;
+      transfer_count: bigint;
+    }[]
+  >(Prisma.sql`
+    SELECT
+      to_char("date", 'YYYY-MM-DD') AS day,
+      (SUM(COALESCE("amountPrimaryMinor", "amountMinor"))
+        FILTER (WHERE "type" = 'INCOME'))::bigint  AS income,
+      (SUM(COALESCE("amountPrimaryMinor", "amountMinor"))
+        FILTER (WHERE "type" = 'EXPENSE'))::bigint AS expense,
+      (SUM(CASE
+        WHEN "type" = 'TRANSFER' AND "transferDirection" = 'IN'
+          THEN  COALESCE("amountPrimaryMinor", "amountMinor")
+        WHEN "type" = 'TRANSFER' AND "transferDirection" = 'OUT'
+          THEN -COALESCE("amountPrimaryMinor", "amountMinor")
+        ELSE 0
+      END))::bigint AS transfer_net,
+      COUNT(*) FILTER (WHERE "type" IN ('INCOME', 'EXPENSE')) AS count,
+      COUNT(*) FILTER (WHERE "type" = 'TRANSFER') AS transfer_count
+    FROM "Transaction"
+    WHERE "spaceId" = ${spaceId}
+      AND "deletedAt" IS NULL
+      AND "date" >= ${from}
+      AND "date" <= ${to}
+    GROUP BY 1
+    ORDER BY 1
+  `);
+
+  return rows.map((row) => ({
+    day: row.day,
+    incomeMinor: row.income ?? 0n,
+    expenseMinor: row.expense ?? 0n,
+    transferNetMinor: row.transfer_net ?? 0n,
+    transactionCount: Number(row.count),
+    transferCount: Number(row.transfer_count),
   }));
 };
 

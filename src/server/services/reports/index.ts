@@ -1,6 +1,7 @@
 import {
   balanceBefore,
   categoryTotals,
+  dailyTotals,
   monthlyTotals,
 } from "@/server/db/raw/reports";
 import type { ScopedDb } from "@/server/db/scoped";
@@ -11,29 +12,40 @@ import type {
   CategoryReportItem,
   ComparisonItem,
   ComparisonReport,
+  ComparisonTarget,
   MemberReport,
-  MonthlyPoint,
-  MonthlyReport,
+  SeriesPoint,
+  SeriesReport,
 } from "@/shared/contracts/reports-v2";
 import {
-  addMonths,
-  endOfMonth,
-  formatCalendarDate,
   fromCalendarDate,
+  minCalendarDate,
   monthRange,
-  startOfMonth,
   todayIn,
   type CalendarDate,
+  type DateRange,
 } from "@/shared/dates";
+import {
+  bucketKeyFor,
+  bucketLabel,
+  bucketsFor,
+  bucketTitle,
+  dayCount,
+  granularityFor,
+  lastMonthsRange,
+  previousRange,
+  sameRangeLastYear,
+  type SeriesGranularity,
+} from "@/shared/periods";
 
 import { groupSumInPrimary } from "./aggregate";
 
 /**
  * Reportes.
  *
- * Las series por mes bajan a SQL crudo (`db/raw/reports.ts`) porque agrupar
- * por mes necesita `date_trunc` y el `groupBy` de Prisma solo admite columnas.
- * El resto usa el cliente scopeado.
+ * Las series bajan a SQL crudo (`db/raw/reports.ts`) porque agrupar por mes o
+ * por día necesita `date_trunc`/`to_char` y el `groupBy` de Prisma solo admite
+ * columnas. El resto usa el cliente scopeado.
  *
  * Todos los importes salen ya en la moneda primaria del Space: los reportes
  * históricos usan la conversión CONGELADA al cargar cada movimiento, nunca la
@@ -50,98 +62,189 @@ interface SpaceContext {
   readonly primaryCurrency: string;
 }
 
-// ─────────────────── evolución mensual + cash flow ───────────────────────────
+// ───────────────────── serie temporal + cash flow ────────────────────────────
+
+export interface SeriesOptions {
+  /**
+   * `auto` elige según el largo del rango (ver `granularityFor`). Se puede
+   * fijar, ya sea porque el usuario lo pidió o porque el consumidor necesita
+   * una forma concreta: `monthlyReport` fija `month` para que "los últimos N
+   * meses" sean siempre N puntos mensuales, incluso con N = 1.
+   */
+  readonly granularity?: SeriesGranularity | "auto";
+  /** 0 = domingo … 6 = sábado. Solo importa en el corte semanal. */
+  readonly weekStartsOn?: number;
+  /**
+   * Qué día es hoy para quien pregunta. Acota el promedio diario a los días
+   * ya transcurridos: el 10 del mes, el gasto medio por día se divide por 10,
+   * no por 31. Sin esto se asume que el rango entero ya pasó.
+   */
+  readonly today?: CalendarDate;
+}
+
+interface Totals {
+  incomeMinor: bigint;
+  expenseMinor: bigint;
+  transferNetMinor: bigint;
+  transactionCount: number;
+  transferCount: number;
+}
 
 /**
- * Serie mensual con el patrimonio acumulado.
+ * Serie de ingresos, gastos y patrimonio acumulado sobre un rango.
  *
- * Los meses SIN movimientos se rellenan con ceros. Si se omitieran, el gráfico
- * uniría diciembre con febrero como si fueran contiguos y la pendiente
- * mentiría.
+ * Los cortes SIN movimientos se rellenan con ceros. Si se omitieran, el
+ * gráfico uniría diciembre con febrero como si fueran contiguos y la
+ * pendiente mentiría.
  *
  * El acumulado arranca del patrimonio real anterior al rango, no de cero: si
- * no, la curva daría a entender que todo nació con el primer mes del gráfico.
+ * no, la curva daría a entender que todo nació con el primer corte.
  */
-export const monthlyReport = async (
+export const seriesReport = async (
   space: SpaceContext,
   locale: string,
-  viewerTimezone: string,
-  months: number,
-): Promise<MonthlyReport> => {
-  const today = todayIn(viewerTimezone);
-  const lastMonth = startOfMonth(today);
-  const firstMonth = addMonths(lastMonth, -(months - 1));
+  range: DateRange,
+  options: SeriesOptions = {},
+): Promise<SeriesReport> => {
+  const granularity =
+    options.granularity === undefined || options.granularity === "auto"
+      ? granularityFor(range)
+      : options.granularity;
+  const weekStartsOn = options.weekStartsOn ?? 1;
+
+  const from = fromCalendarDate(range.start);
+  const to = fromCalendarDate(range.end);
 
   const [rows, opening] = await Promise.all([
-    monthlyTotals(
-      space.spaceId,
-      fromCalendarDate(firstMonth),
-      fromCalendarDate(endOfMonth(lastMonth)),
-    ),
-    balanceBefore(space.spaceId, fromCalendarDate(firstMonth)),
+    granularity === "month"
+      ? monthlyTotals(space.spaceId, from, to).then((list) =>
+          list.map((row) => ({ key: row.month, ...row })),
+        )
+      : dailyTotals(space.spaceId, from, to).then((list) =>
+          list.map((row) => ({
+            key: bucketKeyFor(row.day, range, granularity, weekStartsOn),
+            ...row,
+          })),
+        ),
+    balanceBefore(space.spaceId, from),
   ]);
 
-  const byMonth = new Map(rows.map((row) => [row.month, row]));
+  // Por semana llegan varios días con la misma clave: se suman.
+  const byKey = new Map<string, Totals>();
+  for (const row of rows) {
+    const current = byKey.get(row.key);
+    byKey.set(row.key, {
+      incomeMinor: (current?.incomeMinor ?? 0n) + row.incomeMinor,
+      expenseMinor: (current?.expenseMinor ?? 0n) + row.expenseMinor,
+      transferNetMinor:
+        (current?.transferNetMinor ?? 0n) + row.transferNetMinor,
+      transactionCount: (current?.transactionCount ?? 0) + row.transactionCount,
+      transferCount: (current?.transferCount ?? 0) + row.transferCount,
+    });
+  }
 
   let running = opening;
-  const points: MonthlyPoint[] = [];
+  const points: SeriesPoint[] = [];
 
-  for (let offset = 0; offset < months; offset += 1) {
-    const anchor = addMonths(firstMonth, offset);
-    const key = anchor.slice(0, 7);
-    const row = byMonth.get(key);
-
-    const incomeMinor = row?.incomeMinor ?? 0n;
-    const expenseMinor = row?.expenseMinor ?? 0n;
+  for (const bucket of bucketsFor(range, granularity, weekStartsOn)) {
+    const totals = byKey.get(bucket.key);
+    const incomeMinor = totals?.incomeMinor ?? 0n;
+    const expenseMinor = totals?.expenseMinor ?? 0n;
     // El neto de transferencias solo mueve el ACUMULADO, nunca las columnas:
     // para los pares reales es cero, y la pata suelta de un préstamo es caja
     // que se fue (o vino) sin ser gasto ni ingreso.
-    running += incomeMinor - expenseMinor + (row?.transferNetMinor ?? 0n);
+    running += incomeMinor - expenseMinor + (totals?.transferNetMinor ?? 0n);
 
     points.push({
-      month: key,
-      label: formatCalendarDate(anchor, locale, {
-        month: "short",
-        year: "2-digit",
-      }),
+      key: bucket.key,
+      from: bucket.start,
+      to: bucket.end,
+      label: bucketLabel(bucket, granularity, locale),
+      title: bucketTitle(bucket, granularity, locale),
       income: money(incomeMinor, space.primaryCurrency),
       expense: money(expenseMinor, space.primaryCurrency),
       net: money(incomeMinor - expenseMinor, space.primaryCurrency),
       runningBalance: money(running, space.primaryCurrency),
-      transactionCount: row?.transactionCount ?? 0,
+      transactionCount: totals?.transactionCount ?? 0,
+      transferCount: totals?.transferCount ?? 0,
     });
   }
 
+  const sum = (
+    list: readonly SeriesPoint[],
+    pick: (p: SeriesPoint) => MoneyDTO,
+  ): bigint =>
+    list.reduce((total, point) => total + BigInt(pick(point).amountMinor), 0n);
+
   /**
-   * Los promedios se calculan solo sobre los meses CON actividad. Incluir los
-   * vacíos —los anteriores a que se empezara a usar la app— hundiría el
-   * promedio y daría una lectura falsa.
+   * Sobre qué se promedia.
+   *
+   * Por semana y por mes, solo sobre los cortes CON actividad: incluir los
+   * meses anteriores a que se empezara a usar la app hundiría el promedio y
+   * daría una lectura falsa.
+   *
+   * Por día es al revés: los días sin gasto SON parte del promedio —gastar
+   * 100 € en 10 días de 31 es gastar 32 € por día, no 100—, pero solo los que
+   * ya pasaron: el 10 del mes se divide por 10, no por 31.
    */
   const active = points.filter((p) => p.transactionCount > 0);
-  const divisor = BigInt(Math.max(active.length, 1));
-
-  const sum = (pick: (p: MonthlyPoint) => MoneyDTO): bigint =>
-    active.reduce(
-      (total, point) => total + BigInt(pick(point).amountMinor),
-      0n,
-    );
+  const elapsedDays =
+    options.today === undefined
+      ? dayCount(range)
+      : options.today < range.start
+        ? 0
+        : dayCount({
+            start: range.start,
+            end: minCalendarDate(range.end, options.today),
+          });
+  const basis = granularity === "day" ? points : active;
+  const divisor = BigInt(
+    Math.max(granularity === "day" ? elapsedDays : active.length, 1),
+  );
 
   const ranked = [...active].sort((a, b) =>
     Number(BigInt(b.net.amountMinor) - BigInt(a.net.amountMinor)),
   );
 
+  const totalIncome = sum(points, (p) => p.income);
+  const totalExpense = sum(points, (p) => p.expense);
+  const currency = space.primaryCurrency;
+
   return {
-    currency: space.primaryCurrency,
+    currency,
+    granularity,
+    from: range.start,
+    to: range.end,
     points,
-    averageIncome: money(sum((p) => p.income) / divisor, space.primaryCurrency),
-    averageExpense: money(
-      sum((p) => p.expense) / divisor,
-      space.primaryCurrency,
-    ),
-    averageNet: money(sum((p) => p.net) / divisor, space.primaryCurrency),
-    bestMonth: ranked[0]?.month ?? null,
-    worstMonth: ranked.at(-1)?.month ?? null,
+    totalIncome: money(totalIncome, currency),
+    totalExpense: money(totalExpense, currency),
+    totalNet: money(totalIncome - totalExpense, currency),
+    averageIncome: money(sum(basis, (p) => p.income) / divisor, currency),
+    averageExpense: money(sum(basis, (p) => p.expense) / divisor, currency),
+    averageNet: money(sum(basis, (p) => p.net) / divisor, currency),
+    best: ranked[0]?.key ?? null,
+    worst: ranked.at(-1)?.key ?? null,
   };
+};
+
+/**
+ * Los últimos N meses hasta el actual, siempre por mes.
+ *
+ * Es la forma original de la serie y la que usan los tests de otros módulos
+ * para verificar que una transferencia, un aporte a una meta o un préstamo
+ * no se cuelan en el gasto del mes.
+ */
+export const monthlyReport = (
+  space: SpaceContext,
+  locale: string,
+  viewerTimezone: string,
+  months: number,
+): Promise<SeriesReport> => {
+  const today = todayIn(viewerTimezone);
+  return seriesReport(space, locale, lastMonthsRange(today, months), {
+    granularity: "month",
+    today,
+  });
 };
 
 // ───────────────────────── desglose por categoría ────────────────────────────
@@ -282,21 +385,27 @@ export const categoryReport = async (
   };
 };
 
-// ────────────────────────── comparativa mes a mes ────────────────────────────
+// ──────────────────────────── comparativa ────────────────────────────────────
 
 /**
- * Mes contra mes, categoría por categoría.
+ * Un período contra otro, categoría por categoría.
+ *
+ * Contra qué lo dice `against`: el inmediatamente anterior del mismo largo
+ * (`previousRange`, la misma regla que usan las flechas del selector, así lo
+ * que se compara es lo que se vería al retroceder) o el mismo período del año
+ * pasado (`sameRangeLastYear`), que es lo que muestra la estacionalidad.
  *
  * Ordenado por variación ABSOLUTA: lo primero que uno quiere ver es qué
  * cambió más, sin importar si subió o bajó.
  */
 export const comparisonReport = async (
   space: SpaceContext,
-  month: CalendarDate,
+  current: DateRange,
   kind: "INCOME" | "EXPENSE",
+  against: ComparisonTarget = "previous",
 ): Promise<ComparisonReport> => {
-  const current = monthRange(month);
-  const previous = monthRange(addMonths(month, -1));
+  const previous =
+    against === "year" ? sameRangeLastYear(current) : previousRange(current);
 
   const [currentRows, previousRows] = await Promise.all([
     categoryTotals(
@@ -328,7 +437,7 @@ export const comparisonReport = async (
     items.push(buildItem(row, previousTotal, space.primaryCurrency));
   }
 
-  // Categorías que existían el mes pasado y este mes no tienen nada. Se
+  // Categorías con movimientos en el período anterior y nada en este. Se
   // incluyen: "dejaste de gastar en esto" es información, no ausencia de ella.
   for (const row of previousRows) {
     const key = row.categoryId ?? "none";
@@ -362,8 +471,9 @@ export const comparisonReport = async (
 
   return {
     currency: space.primaryCurrency,
-    currentMonth: current.start.slice(0, 7),
-    previousMonth: previous.start.slice(0, 7),
+    against,
+    current: { from: current.start, to: current.end },
+    previous: { from: previous.start, to: previous.end },
     currentTotal: money(currentTotal, space.primaryCurrency),
     previousTotal: money(previousTotal, space.primaryCurrency),
     delta: money(currentTotal - previousTotal, space.primaryCurrency),
@@ -470,9 +580,5 @@ export const memberReport = async (
 };
 
 /** Rango por defecto de los reportes con rango: el mes en curso. */
-export const defaultRange = (
-  viewerTimezone: string,
-): { from: CalendarDate; to: CalendarDate } => {
-  const range = monthRange(todayIn(viewerTimezone));
-  return { from: range.start, to: range.end };
-};
+export const defaultRange = (viewerTimezone: string): DateRange =>
+  monthRange(todayIn(viewerTimezone));

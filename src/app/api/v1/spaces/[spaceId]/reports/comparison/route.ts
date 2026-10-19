@@ -5,7 +5,8 @@ import { json } from "@/server/api/responses";
 import { systemClient } from "@/server/db/system";
 import { comparisonReport } from "@/server/services/reports";
 import { comparisonQuerySchema } from "@/shared/contracts/reports-v2";
-import { todayIn } from "@/shared/dates";
+import { monthRange, todayIn } from "@/shared/dates";
+import { rangeFromQuery } from "@/shared/periods";
 
 export const runtime = "nodejs";
 
@@ -15,11 +16,14 @@ const paramsSchema = z
 type Params = z.infer<typeof paramsSchema>;
 
 /**
+ * GET /api/v1/spaces/:spaceId/reports/comparison?from=&to=&kind=&against=
  * GET /api/v1/spaces/:spaceId/reports/comparison?month=&kind=EXPENSE
  *
- * Mes contra mes, categoría por categoría, ordenado por cuánto cambió cada
- * una. Incluye las que existían el mes pasado y este mes no tienen nada:
- * "dejaste de gastar en esto" es información, no ausencia de ella.
+ * Un período contra el inmediatamente anterior del mismo largo —o contra el
+ * mismo período del año pasado, con `against=year`—, categoría por categoría,
+ * ordenado por cuánto cambió cada una. Incluye las que tenían movimientos
+ * antes y ahora no: "dejaste de gastar en esto" es información, no ausencia
+ * de ella.
  */
 export const GET = route<undefined, Params>(
   { params: paramsSchema, space: { minRole: "VIEWER" } },
@@ -29,11 +33,16 @@ export const GET = route<undefined, Params>(
       select: { primaryCurrency: true },
     });
 
+    const current = rangeFromQuery(params, () =>
+      monthRange(params.month ?? todayIn(session.timezone)),
+    );
+
     return json(
       await comparisonReport(
         { spaceId: access.spaceId, primaryCurrency: space.primaryCurrency },
-        params.month ?? todayIn(session.timezone),
+        current,
         params.kind,
+        params.against,
       ),
     );
   },

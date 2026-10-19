@@ -42,6 +42,8 @@ export interface AuthenticatedSession {
   readonly name: string;
   readonly timezone: string;
   readonly locale: string;
+  /** 0 = domingo … 6 = sábado. Preferencia del usuario, como la timezone. */
+  readonly weekStartsOn: number;
   readonly emailVerified: boolean;
   readonly activeSpaceId: string | null;
 }
@@ -75,6 +77,7 @@ export const resolveSession = async (
       name: true,
       timezone: true,
       locale: true,
+      weekStartsOn: true,
       emailVerifiedAt: true,
       activeSpaceId: true,
       deletedAt: true,
@@ -104,6 +107,7 @@ export const resolveSession = async (
     name: user.name,
     timezone: user.timezone,
     locale: user.locale,
+    weekStartsOn: user.weekStartsOn,
     emailVerified: user.emailVerifiedAt !== null,
     activeSpaceId: user.activeSpaceId,
   };

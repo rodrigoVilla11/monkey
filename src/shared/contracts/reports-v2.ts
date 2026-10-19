@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+import {
+  allowedGranularities,
+  exceedsMaxRange,
+  MAX_RANGE_MONTHS,
+  SERIES_GRANULARITIES,
+  type SeriesGranularity,
+} from "../periods";
 import { calendarDateSchema, type MoneyDTO } from "./common";
 
 /**
@@ -9,64 +16,172 @@ import { calendarDateSchema, type MoneyDTO } from "./common";
  * consumidores distintos: el dashboard es una pantalla fija y esto es una
  * herramienta de análisis con rangos y pestañas.
  *
+ * Todos los reportes aceptan un rango `from`/`to` inclusivo con las MISMAS
+ * reglas (`withRangeRules`): o vienen los dos extremos o ninguno, ordenados y
+ * de hasta 36 meses. Lo que cambia entre reportes es qué pasa cuando no
+ * viene: la serie toma los últimos N meses y el resto el mes en curso.
+ *
  * Módulo puro: sin Next, sin Prisma, sin React.
  */
 
-/** Cuántos meses hacia atrás. 24 es el techo: más no entra en un teléfono. */
-export const monthlyReportQuerySchema = z.object({
-  months: z.coerce.number().int().min(2).max(24).default(12),
-});
+export type { SeriesGranularity } from "../periods";
 
-export const rangeReportQuerySchema = z.object({
+interface OptionalRange {
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
+}
+
+const rangeFields = {
   from: calendarDateSchema.optional(),
   to: calendarDateSchema.optional(),
-});
+};
 
-export const categoryReportQuerySchema = rangeReportQuerySchema.extend({
-  kind: z.enum(["INCOME", "EXPENSE"]).default("EXPENSE"),
-});
+const hasRange = (value: OptionalRange): value is Required<OptionalRange> =>
+  value.from !== undefined && value.to !== undefined;
 
-export const comparisonQuerySchema = z.object({
-  /** Mes a comparar contra el anterior. Por defecto, el actual. */
-  month: calendarDateSchema.optional(),
-  kind: z.enum(["INCOME", "EXPENSE"]).default("EXPENSE"),
-});
+/**
+ * Las reglas de un rango, aplicadas a cualquier schema que lo lleve. Están en
+ * un solo lugar para que los cuatro endpoints no puedan diverger: un extremo
+ * solo no es un rango, y un rango sin tope es una consulta sin tope.
+ */
+const withRangeRules = <T extends z.ZodType>(schema: T): T =>
+  schema
+    .refine(
+      (value: unknown) => {
+        const v = value as OptionalRange;
+        return (v.from === undefined) === (v.to === undefined);
+      },
+      { message: "Hay que indicar inicio y fin", path: ["to"] },
+    )
+    .refine(
+      (value: unknown) => {
+        const v = value as OptionalRange;
+        return !hasRange(v) || v.from <= v.to;
+      },
+      {
+        message: "El inicio del rango tiene que ser anterior al fin",
+        path: ["to"],
+      },
+    )
+    .refine(
+      (value: unknown) => {
+        const v = value as OptionalRange;
+        return !hasRange(v) || !exceedsMaxRange({ start: v.from, end: v.to });
+      },
+      {
+        message: `El rango no puede superar los ${String(MAX_RANGE_MONTHS)} meses`,
+        path: ["to"],
+      },
+    );
 
-export type MonthlyReportQuery = z.infer<typeof monthlyReportQuerySchema>;
-export type RangeReportQuery = z.infer<typeof rangeReportQuerySchema>;
+export const categoryReportQuerySchema = withRangeRules(
+  z.object({
+    ...rangeFields,
+    kind: z.enum(["INCOME", "EXPENSE"]).default("EXPENSE"),
+  }),
+);
+
+/**
+ * Serie temporal. Con `from`/`to`, el corte se elige solo según el largo del
+ * rango (ver `granularityFor`) salvo que se pida uno en concreto de los que
+ * ese rango admite (`allowedGranularities`); sin rango, los últimos `months`
+ * meses por mes.
+ */
+export const seriesReportQuerySchema = withRangeRules(
+  z.object({
+    ...rangeFields,
+    months: z.coerce.number().int().min(1).max(24).optional(),
+    granularity: z.enum(["auto", ...SERIES_GRANULARITIES]).default("auto"),
+  }),
+).refine(
+  (value) =>
+    value.granularity === "auto" ||
+    !hasRange(value) ||
+    allowedGranularities({ start: value.from, end: value.to }).includes(
+      value.granularity,
+    ),
+  {
+    message: "Ese corte no se puede usar con este rango",
+    path: ["granularity"],
+  },
+);
+
+/**
+ * Comparativa. Con `from`/`to` se compara ese rango; si no, el mes de `month`
+ * (o el actual). `against` dice contra qué: el período inmediatamente
+ * anterior del mismo largo, o el mismo período del año pasado.
+ */
+export const comparisonQuerySchema = withRangeRules(
+  z.object({
+    ...rangeFields,
+    month: calendarDateSchema.optional(),
+    kind: z.enum(["INCOME", "EXPENSE"]).default("EXPENSE"),
+    against: z.enum(["previous", "year"]).default("previous"),
+  }),
+);
+
 export type CategoryReportQuery = z.infer<typeof categoryReportQuerySchema>;
+export type SeriesReportQuery = z.infer<typeof seriesReportQuerySchema>;
 export type ComparisonQuery = z.infer<typeof comparisonQuerySchema>;
+export type ComparisonTarget = ComparisonQuery["against"];
 
-// ─────────────────────── evolución mensual y cash flow ───────────────────────
+/** Un rango tal como viaja en las respuestas. */
+export interface PeriodDTO {
+  readonly from: string;
+  readonly to: string;
+}
 
-export interface MonthlyPoint {
-  /** "YYYY-MM". */
-  readonly month: string;
-  /** Etiqueta ya formateada en el locale de quien pregunta. */
+// ───────────────────────── serie temporal y cash flow ────────────────────────
+
+export interface SeriesPoint {
+  /** "YYYY-MM" por mes; la fecha de inicio del corte por día y por semana. */
+  readonly key: string;
+  readonly from: string;
+  readonly to: string;
+  /** Etiqueta corta para el eje, ya formateada en el locale de quien pregunta. */
   readonly label: string;
+  /** Nombre completo del corte, para la tabla y el detalle. */
+  readonly title: string;
   readonly income: MoneyDTO;
   readonly expense: MoneyDTO;
   /** income − expense. Puede ser negativo. */
   readonly net: MoneyDTO;
   /**
-   * Patrimonio acumulado al cierre del mes: es la curva del cash flow.
+   * Patrimonio acumulado al cierre del corte: es la curva del cash flow.
    * Incluye las transferencias y el saldo de apertura de las cuentas, porque
    * sigue el patrimonio y no el resultado.
    */
   readonly runningBalance: MoneyDTO;
+  /** Ingresos y gastos del corte. Las transferencias no cuentan acá. */
   readonly transactionCount: number;
+  /**
+   * Patas de transferencia del corte. No son actividad del resultado, pero
+   * sí mueven el patrimonio: un desembolso de préstamo es un día que vale la
+   * pena ver en la curva aunque no haya ningún gasto.
+   */
+  readonly transferCount: number;
 }
 
-export interface MonthlyReport {
+export interface SeriesReport {
   readonly currency: string;
-  readonly points: readonly MonthlyPoint[];
-  /** Promedios del período, útiles para leer el gráfico de un vistazo. */
+  readonly granularity: SeriesGranularity;
+  readonly from: string;
+  readonly to: string;
+  readonly points: readonly SeriesPoint[];
+  /** Totales del rango completo. */
+  readonly totalIncome: MoneyDTO;
+  readonly totalExpense: MoneyDTO;
+  readonly totalNet: MoneyDTO;
+  /**
+   * Promedios por corte. Por día, sobre los días ya transcurridos del rango;
+   * por semana y por mes, sobre los cortes con actividad.
+   */
   readonly averageIncome: MoneyDTO;
   readonly averageExpense: MoneyDTO;
   readonly averageNet: MoneyDTO;
-  /** Mejor y peor mes por resultado neto. */
-  readonly bestMonth: string | null;
-  readonly worstMonth: string | null;
+  /** Mejor y peor corte por resultado neto (su `key`). */
+  readonly best: string | null;
+  readonly worst: string | null;
 }
 
 // ───────────────────────── desglose por categoría ────────────────────────────
@@ -91,7 +206,7 @@ export interface CategoryReport {
   readonly items: readonly CategoryReportItem[];
 }
 
-// ────────────────────────── comparativa mes a mes ────────────────────────────
+// ──────────────────────────── comparativa ────────────────────────────────────
 
 export interface ComparisonItem {
   readonly categoryId: string | null;
@@ -100,11 +215,11 @@ export interface ComparisonItem {
   readonly icon: string | null;
   readonly current: MoneyDTO;
   readonly previous: MoneyDTO;
-  /** current − previous. Negativo = se gastó menos que el mes pasado. */
+  /** current − previous. Negativo = se gastó menos que en el período anterior. */
   readonly delta: MoneyDTO;
   /**
-   * Variación porcentual. `null` cuando el mes anterior fue cero: dividir por
-   * cero no da "infinito por ciento", da "no comparable".
+   * Variación porcentual. `null` cuando el período anterior fue cero: dividir
+   * por cero no da "infinito por ciento", da "no comparable".
    */
   readonly deltaPercentage: number | null;
   readonly isNew: boolean;
@@ -112,8 +227,9 @@ export interface ComparisonItem {
 
 export interface ComparisonReport {
   readonly currency: string;
-  readonly currentMonth: string;
-  readonly previousMonth: string;
+  readonly against: ComparisonTarget;
+  readonly current: PeriodDTO;
+  readonly previous: PeriodDTO;
   readonly currentTotal: MoneyDTO;
   readonly previousTotal: MoneyDTO;
   readonly delta: MoneyDTO;

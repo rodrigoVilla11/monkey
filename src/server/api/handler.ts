@@ -114,6 +114,29 @@ interface NextRouteArgs {
   readonly params: Promise<Record<string, string>>;
 }
 
+/**
+ * La query string como objeto para Zod.
+ *
+ * Una clave repetida (`?categoryId=a&categoryId=b`) llega como array: es el
+ * contrato de los filtros con listas. `Object.fromEntries` se quedaba con el
+ * último valor en silencio y el filtro parecía funcionar con uno solo.
+ */
+const queryObject = (
+  request: NextRequest,
+): Record<string, string | string[]> => {
+  const query: Record<string, string | string[]> = {};
+  for (const [key, value] of new URL(request.url).searchParams) {
+    const existing = query[key];
+    query[key] =
+      existing === undefined
+        ? value
+        : Array.isArray(existing)
+          ? [...existing, value]
+          : [existing, value];
+  }
+  return query;
+};
+
 const parseBody = async (request: NextRequest): Promise<unknown> => {
   const contentLength = request.headers.get("content-length");
   if (contentLength === "0") return {};
@@ -259,8 +282,10 @@ export function route<TBody = undefined, TParams = undefined>(
       let params = undefined as TParams;
       if (options.params) {
         const routeParams = args ? await args.params : {};
-        const query = Object.fromEntries(new URL(request.url).searchParams);
-        const parsed = options.params.safeParse({ ...query, ...routeParams });
+        const parsed = options.params.safeParse({
+          ...queryObject(request),
+          ...routeParams,
+        });
         if (!parsed.success) {
           throw errors.validation(
             parsed.error.issues.map((issue) => ({

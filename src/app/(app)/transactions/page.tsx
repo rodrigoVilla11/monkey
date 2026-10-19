@@ -9,7 +9,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AttachmentsPanel } from "@/components/transactions/attachments-panel";
@@ -48,25 +49,72 @@ import {
 import { getCurrencyExponent } from "@/shared/currency";
 import { formatCalendarDate } from "@/shared/dates";
 import { hasAtLeast } from "@/shared/roles";
-import type {
-  TransactionDTO,
-  TransactionFilters,
+import {
+  transactionFiltersSchema,
+  type TransactionDTO,
+  type TransactionFilters,
 } from "@/shared/contracts/transactions";
+
+/** Claves de filtro que se aceptan desde la URL. Las de lista, repetidas. */
+const URL_FILTER_KEYS = [
+  "from",
+  "to",
+  "accountId",
+  "categoryId",
+  "createdByUserId",
+  "tagId",
+  "type",
+  "status",
+] as const;
+
+/**
+ * Filtros iniciales desde la URL: es lo que permite que un reporte linkee a
+ * "los movimientos de Alimentación en octubre". Se leen UNA vez al montar y
+ * no se escriben de vuelta (ver el comentario de la pantalla). Lo que no
+ * valida se ignora: la URL la puede haber escrito cualquiera.
+ */
+const filtersFromUrl = (params: URLSearchParams): TransactionFilters => {
+  const raw: Record<string, string | string[]> = {};
+  for (const key of URL_FILTER_KEYS) {
+    const values = params.getAll(key);
+    const [first] = values;
+    if (first === undefined) continue;
+    raw[key] = values.length === 1 ? first : values;
+  }
+  const parsed = transactionFiltersSchema.safeParse(raw);
+  return parsed.success ? parsed.data : {};
+};
+
+/**
+ * `useSearchParams` exige un límite de Suspense para el prerender estático;
+ * sin él, el build de Next falla en esta ruta.
+ */
+export default function TransactionsPage() {
+  return (
+    <Suspense>
+      <TransactionsScreen />
+    </Suspense>
+  );
+}
 
 /**
  * Listado de movimientos con buscador y filtros.
  *
  * Los filtros viven en el estado de esta pantalla y no en la URL: es una vista
  * de consulta, no algo que uno comparta por link, y meterlos en la URL haría
- * que el botón "atrás" del teléfono deshaga filtros de a uno.
+ * que el botón "atrás" del teléfono deshaga filtros de a uno. La URL solo se
+ * LEE al entrar, para que otra pantalla pueda abrir esta ya filtrada.
  */
-export default function TransactionsPage() {
+function TransactionsScreen() {
   const session = useSession();
   const { space } = useActiveSpace();
   const spaceId = space?.id ?? "";
+  const searchParams = useSearchParams();
 
   const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState<TransactionFilters>({});
+  const [filters, setFilters] = useState<TransactionFilters>(() =>
+    filtersFromUrl(searchParams),
+  );
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState<TransactionDTO | null>(null);
   const [editing, setEditing] = useState<TransactionDTO | null>(null);
