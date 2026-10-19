@@ -45,6 +45,25 @@ export const rateFiltersSchema = z.object({
 
 export type RateFilters = z.infer<typeof rateFiltersSchema>;
 
+/**
+ * Búsqueda de la cotización vigente para un par en una fecha: la misma que
+ * usa el servidor para convertir. Existe para que una pantalla pueda mostrar
+ * "con la cotización del día X entran N pesos" ANTES de guardar.
+ */
+export const rateLookupQuerySchema = z
+  .object({
+    baseCurrency: currency,
+    quoteCurrency: currency,
+    /** Si no viene, hoy en la timezone del Space. */
+    date: calendarDateSchema.optional(),
+  })
+  .refine(
+    (value) => value.baseCurrency !== value.quoteCurrency,
+    "Las dos monedas tienen que ser distintas",
+  );
+
+export type RateLookupQuery = z.infer<typeof rateLookupQuerySchema>;
+
 // ────────────────────────────── respuestas ───────────────────────────────────
 
 export interface ExchangeRateDTO {
@@ -75,4 +94,24 @@ export interface MissingRateDTO {
 export interface RatesResponse {
   readonly rates: readonly ExchangeRateDTO[];
   readonly missing: readonly MissingRateDTO[];
+}
+
+/**
+ * La cotización vigente de un par en una fecha, ya resuelta: si lo cargado es
+ * el par inverso, viene invertida y `source` termina en ":inverso". `date` es
+ * la de la cotización usada, que puede ser anterior a la pedida (fin de
+ * semana, feriado).
+ */
+export interface RateLookupDTO {
+  readonly baseCurrency: string;
+  readonly quoteCurrency: string;
+  /** 1 unidad de `base` = `rate` unidades de `quote`. */
+  readonly rate: string;
+  readonly date: string;
+  readonly source: string;
+}
+
+export interface RateLookupResponse {
+  /** `null` si no hay ninguna cotización cargada para el par. */
+  readonly rate: RateLookupDTO | null;
 }

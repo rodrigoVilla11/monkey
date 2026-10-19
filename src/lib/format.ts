@@ -49,6 +49,23 @@ export const isNegative = (value: MoneyDTO): boolean =>
   BigInt(value.amountMinor) < 0n;
 
 /**
+ * Una cotización legible: "1.150,5" en es-ES, "0,000869" para la inversa.
+ * Cifras significativas y no decimales fijos, porque la precisión útil de
+ * EUR→ARS y de ARS→EUR está en lugares distintos del número.
+ */
+export const formatRate = (rate: string, locale: string): string => {
+  const value = Number(rate);
+  if (!Number.isFinite(value)) return rate;
+  try {
+    return new Intl.NumberFormat(locale, {
+      maximumSignificantDigits: 6,
+    }).format(value);
+  } catch {
+    return rate;
+  }
+};
+
+/**
  * Porcentaje con el mismo separador y el mismo signo que los importes de al
  * lado: "45,5 %" en es-ES, "+12,5 %" si se pide el signo. Mezclar un "−"
  * unicode con el "-" de Intl en la misma fila se nota.

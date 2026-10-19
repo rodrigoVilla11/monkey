@@ -16,6 +16,7 @@ import type {
 } from "@/shared/contracts/accounts";
 import type { CategoryTreeNode } from "@/shared/contracts/categories";
 import type { Page } from "@/shared/contracts/common";
+import type { RateLookupResponse } from "@/shared/contracts/rates";
 import type { DashboardResponse } from "@/shared/contracts/reports";
 import type {
   CreateTransactionRequest,
@@ -41,6 +42,38 @@ export const useAccounts = (spaceId: string, includeArchived = false) =>
       ),
     select: (data) => data.accounts,
     enabled: spaceId !== "",
+  });
+
+/**
+ * La cotización vigente de un par en una fecha, tal como la usaría el
+ * servidor. `null` en `pair` apaga la consulta (misma moneda a los dos lados).
+ * La clave cuelga de "rates": cargar una cotización la invalida también.
+ */
+export const useRateLookup = (
+  spaceId: string,
+  pair: { base: string; quote: string; date: string } | null,
+) =>
+  useQuery({
+    queryKey: [
+      ...spaceScopeKey(spaceId),
+      "rates",
+      "lookup",
+      pair?.base ?? "",
+      pair?.quote ?? "",
+      pair?.date ?? "",
+    ],
+    queryFn: () =>
+      api.get<RateLookupResponse>(
+        `/spaces/${spaceId}/rates/lookup${qs({
+          baseCurrency: pair?.base,
+          quoteCurrency: pair?.quote,
+          date: pair?.date,
+        })}`,
+      ),
+    select: (data) => data.rate,
+    enabled: spaceId !== "" && pair !== null && pair.base !== pair.quote,
+    // Una cotización cargada a mano no cambia cada segundo.
+    staleTime: 60_000,
   });
 
 export const useCategories = (spaceId: string, kind?: "INCOME" | "EXPENSE") =>

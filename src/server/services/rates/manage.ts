@@ -6,6 +6,8 @@ import type {
   ExchangeRateDTO,
   MissingRateDTO,
   RateFilters,
+  RateLookupDTO,
+  RateLookupQuery,
   RatesResponse,
 } from "@/shared/contracts/rates";
 import { fromCalendarDate, toCalendarDate, todayIn } from "@/shared/dates";
@@ -75,6 +77,31 @@ export const listRates = async (
   return {
     rates: rows.map(toDTO),
     missing: await missingRates(db, space),
+  };
+};
+
+/**
+ * La cotización vigente de un par en una fecha, resuelta por el proveedor:
+ * la misma que aplicaría una transferencia o un movimiento en esa fecha, así
+ * lo que una pantalla muestra como "calculado" es lo que se guardaría.
+ */
+export const lookupRate = async (
+  timezone: string,
+  query: RateLookupQuery,
+): Promise<RateLookupDTO | null> => {
+  const found = await getRateProvider().find(
+    query.baseCurrency,
+    query.quoteCurrency,
+    query.date ?? todayIn(timezone),
+  );
+  if (found === null) return null;
+
+  return {
+    baseCurrency: query.baseCurrency,
+    quoteCurrency: query.quoteCurrency,
+    rate: found.rate,
+    date: found.date,
+    source: found.source,
   };
 };
 

@@ -31,14 +31,19 @@ const transferAmountSchema = amountMinorSchema.refine(
  * sola pata dejaría los saldos descuadrados, y por eso el endpoint de
  * transacciones no acepta el tipo TRANSFER.
  *
- * **La decisión que importa: entre monedas distintas se piden los DOS
+ * **La decisión que importa: entre monedas distintas lo que manda son los DOS
  * importes, no un importe y una cotización.** Cuando uno mueve euros a una
  * cuenta en pesos, el banco no aplica la cotización publicada: aplica la suya y
- * cobra comisión. Si el importe de destino se calculara a partir de una
+ * cobra comisión. Si el importe de destino se tomara siempre de una
  * cotización, el saldo de la cuenta receptora quedaría mal por la diferencia y
  * no habría forma de cuadrarlo contra el extracto. Diciendo cuánto salió y
  * cuánto llegó, la cotización REAL de la operación sale sola —y es esa, no la
  * del mercado, la que se congela.
+ *
+ * La cotización cargada sirve como PROPUESTA: si no se indica cuánto entró,
+ * el servidor lo calcula con ella y la pantalla lo muestra precargado para
+ * corregirlo. Así el caso común (la cotización del día está bien) es un toque
+ * y el caso real (el banco aplicó otra) sigue siendo posible.
  *
  * Módulo puro: sin Next, sin Prisma, sin React.
  */
@@ -52,8 +57,10 @@ export const createTransferRequestSchema = z
     /**
      * Lo que entra en la cuenta de destino, en la moneda de esa cuenta.
      *
-     * Obligatorio solo si las dos cuentas tienen monedas distintas. Si son
-     * iguales se ignora: no puede entrar un importe distinto del que salió.
+     * Entre monedas distintas, si no viene se calcula con la cotización
+     * cargada para la fecha (directa o inversa); sin cotización, es
+     * obligatorio. Entre cuentas de la misma moneda se ignora: no puede entrar
+     * un importe distinto del que salió.
      */
     amountInMinor: transferAmountSchema.optional(),
     /** Si no viene, el servidor usa "hoy" en la timezone de quien carga. */

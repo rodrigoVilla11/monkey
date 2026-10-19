@@ -13,7 +13,7 @@ It is a project I built for my own use and keep developing. Deployment target is
 ## Features
 
 - **Shared Spaces with roles.** A Space is personal or shared. Members are OWNER / ADMIN / MEMBER / VIEWER, invited by email with expiring tokens. Every domain endpoint declares its minimum role.
-- **Accounts, transactions, transfers, budgets.** Multi-currency accounts; income/expense with categories, tags and attachments (receipts as JPEG/PNG/WebP/HEIC/PDF, validated by magic bytes); two-legged transfers that are net-zero by construction; budgets per category, optionally restricted to specific accounts, with rollover.
+- **Accounts, transactions, transfers, budgets.** Multi-currency accounts; income/expense with categories, tags and attachments (receipts as JPEG/PNG/WebP/HEIC/PDF, validated by magic bytes); two-legged transfers that are net-zero by construction (between currencies the destination amount is proposed from the loaded rate and can be corrected to what the bank actually credited); budgets per category, optionally restricted to specific accounts, with rollover.
 - **Expense splitting and settlements.** A split is an annotation on a transaction, not a debt row. Balances between members are aggregated on read and the app suggests the minimal set of payments to settle up.
 - **Recurring rules materialized by a cron job.** Rent on the 1st, salary on the last Friday. Missed occurrences are backfilled with their real dates; the job is idempotent at the database level.
 - **Savings goals and debts.** Goals track contributions (optionally linked to real transfers) and show reserved vs. available balance per account. Debts record what was agreed and what was paid; no amortization guessing.

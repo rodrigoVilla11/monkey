@@ -330,6 +330,13 @@ export const ROUTES: readonly RouteSpec[] = [
     note: "ExchangeRate no tiene spaceId: lo que se carga acá lo ven todos los Spaces",
   },
   {
+    method: "GET",
+    path: "/api/v1/spaces/[spaceId]/rates/lookup",
+    auth: "verified",
+    minRole: "VIEWER",
+    note: "La cotización vigente de un par en una fecha, directa o inversa: lo que la transferencia usaría para convertir",
+  },
+  {
     method: "DELETE",
     path: "/api/v1/spaces/[spaceId]/rates/[rateId]",
     auth: "verified",

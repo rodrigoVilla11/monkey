@@ -198,16 +198,17 @@ const resolveTransfer = async (
         "Entre cuentas de la misma moneda tiene que entrar lo mismo que sale",
       );
     }
-  } else if (rawAmountInMinor === undefined) {
-    throw errors.conflict(
-      "UNPROCESSABLE",
-      `Las cuentas están en monedas distintas (${from.currency} y ${to.currency}): indicá cuánto entra en la cuenta de destino`,
-    );
   }
 
   const amountInMinor = sameCurrency
     ? amountOutMinor
-    : (rawAmountInMinor ?? amountOutMinor);
+    : (rawAmountInMinor ??
+      (await convertWithTableRate(
+        amountOutMinor,
+        from.currency,
+        to.currency,
+        date,
+      )));
 
   // El importe en moneda primaria: uno solo para las dos patas.
   let amountPrimaryMinor: bigint;
@@ -285,6 +286,44 @@ const legConversion = (
   }
 
   return { exchangeRateSnapshot: rate.value, amountPrimaryMinor };
+};
+
+/**
+ * Cuánto entra en la cuenta de destino si nadie lo dijo: lo que salió,
+ * convertido con la cotización cargada para ese día (directa o inversa).
+ *
+ * Es el cambio de moneda automático. La cotización de la tabla rara vez es la
+ * que aplicó el banco —por eso la pantalla deja corregir el importe—, pero
+ * sin ella una transferencia entre monedas obligaba a hacer la cuenta a mano
+ * siempre. Si no hay ninguna cargada, el error dice qué par falta.
+ */
+const convertWithTableRate = async (
+  amountOutMinor: bigint,
+  fromCurrency: string,
+  toCurrency: string,
+  date: CalendarDate,
+): Promise<bigint> => {
+  const found = await getRateProvider().find(fromCurrency, toCurrency, date);
+  if (found === null) {
+    throw errors.conflict(
+      "UNPROCESSABLE",
+      `Las cuentas están en monedas distintas (${fromCurrency} y ${toCurrency}) y no hay cotización cargada: indicá cuánto entra en la cuenta de destino o cargá la cotización ${fromCurrency} → ${toCurrency}`,
+    );
+  }
+
+  const converted = convert(
+    money(amountOutMinor, fromCurrency),
+    found.rate,
+    toCurrency,
+  );
+  if (!converted.ok || converted.value.amountMinor <= 0n) {
+    throw errors.conflict(
+      "UNPROCESSABLE",
+      `El importe es demasiado chico para convertirlo a ${toCurrency} con la cotización cargada`,
+    );
+  }
+
+  return converted.value.amountMinor;
 };
 
 /** Solo se usa cuando NINGUNA de las dos cuentas está en la moneda primaria. */
