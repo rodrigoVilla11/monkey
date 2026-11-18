@@ -1,9 +1,13 @@
 import { z } from "zod";
 
-import { errors } from "@/server/api/errors";
 import { route } from "@/server/api/handler";
 import { json } from "@/server/api/responses";
+import { resolveAcceptAccount } from "@/server/services/recurring";
 import { materializeDueRules } from "@/server/services/recurring/materialize";
+import {
+  acceptRecurringRuleRequestSchema,
+  type AcceptRecurringRuleRequest,
+} from "@/shared/contracts/recurring";
 import { todayIn } from "@/shared/dates";
 
 export const runtime = "nodejs";
@@ -23,26 +27,35 @@ type Params = z.infer<typeof paramsSchema>;
  * aceptar ES confirmar; hacerlas nacer pendientes obligaría a confirmar lo
  * mismo dos veces.
  *
+ * Si la regla no tiene cuenta, este es el momento de elegirla: `accountId` en
+ * el body, del Space y en la moneda del programado. Con cuenta en la regla, el
+ * body se ignora.
+ *
  * Idempotente contra el cron y el barrido del inicio: el unique parcial
  * (spaceId, recurringRuleId, date) descarta duplicados. Si no hay nada
  * vencido, responde `created: 0` y no pasa nada.
  */
-export const POST = route<undefined, Params>(
-  { params: paramsSchema, space: { minRole: "MEMBER" } },
-  async ({ params, access, session, db, logger }) => {
+export const POST = route<AcceptRecurringRuleRequest, Params>(
+  {
+    body: acceptRecurringRuleRequestSchema,
+    params: paramsSchema,
+    space: { minRole: "MEMBER" },
+  },
+  async ({ body, params, access, session, db, logger }) => {
     // 404 antes de barrer: el cliente scopeado garantiza que una regla de otro
     // Space no aparezca, y "no encontrada" es la respuesta correcta para eso.
-    const rule = await db.recurringRule.findFirst({
-      where: { id: params.ruleId },
-      select: { id: true },
-    });
-    if (rule === null) throw errors.notFound("No se encontró la regla");
+    const { accountId } = await resolveAcceptAccount(
+      db,
+      params.ruleId,
+      body.accountId,
+    );
 
     const report = await materializeDueRules({
       spaceId: access.spaceId,
       ruleId: params.ruleId,
       until: todayIn(session.timezone),
       post: true,
+      accountId,
       logger,
     });
 

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import {
+  CalendarClock,
   Check,
   ChevronRight,
   CircleDashed,
@@ -13,8 +14,10 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { toast } from "sonner";
 
+import { AcceptRuleDrawer } from "@/components/recurring/accept-rule-drawer";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMoneyDTO, formatSignedAmount } from "@/lib/format";
@@ -25,7 +28,11 @@ import {
 } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { cn } from "@/lib/utils";
-import type { PendingSummary } from "@/shared/contracts/reports";
+import type {
+  DueRuleItem,
+  DueRulesSummary,
+  PendingSummary,
+} from "@/shared/contracts/reports";
 import { formatCalendarDate } from "@/shared/dates";
 import { hasAtLeast } from "@/shared/roles";
 
@@ -160,6 +167,20 @@ export default function DashboardPage() {
       {dashboard.data.pendingTransactions.count > 0 && (
         <PendingCard
           pending={dashboard.data.pendingTransactions}
+          spaceId={spaceId}
+          locale={locale}
+          canEdit={space !== undefined && hasAtLeast(space.role, "MEMBER")}
+        />
+      )}
+
+      {/**
+       * Programados sin cuenta que ya vencieron. No son movimientos todavía:
+       * esperan que alguien diga de qué cuenta salió la plata, y con eso se
+       * generan confirmados. Solo aparece si hay alguno esperando.
+       */}
+      {dashboard.data.dueRules.count > 0 && (
+        <DueRulesCard
+          due={dashboard.data.dueRules}
           spaceId={spaceId}
           locale={locale}
           canEdit={space !== undefined && hasAtLeast(space.role, "MEMBER")}
@@ -475,6 +496,111 @@ function PendingCard({
           y {pending.count - pending.items.length} más en Movimientos
           <ChevronRight className="size-3.5" />
         </Link>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Programados sin cuenta ya vencidos. Elegir la cuenta ES aceptarlos: se
+ * materializan todas sus ocurrencias vencidas en esa cuenta, confirmadas.
+ */
+function DueRulesCard({
+  due,
+  spaceId,
+  locale,
+  canEdit,
+}: {
+  due: DueRulesSummary;
+  spaceId: string;
+  locale: string;
+  canEdit: boolean;
+}) {
+  const [choosing, setChoosing] = useState<DueRuleItem | null>(null);
+
+  return (
+    <Card className="gap-2 p-4">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-sm font-semibold">
+          <CalendarClock className="size-4" />
+          Programados sin cuenta
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {due.count}
+        </span>
+      </div>
+
+      <div className="divide-y">
+        {due.items.map((item) => (
+          <div key={item.id} className="flex items-center gap-2 py-1.5">
+            <span
+              className="size-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: item.categoryColor ?? "var(--muted)" }}
+              aria-hidden
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium">
+                {item.description ?? item.categoryName ?? "Sin descripción"}
+              </span>
+              <span className="block truncate text-[11px] text-muted-foreground">
+                Venció el{" "}
+                {formatCalendarDate(item.dueDate, locale, {
+                  day: "numeric",
+                  month: "short",
+                })}
+                {item.dueCount > 1 && ` · ${String(item.dueCount)} vencidos`}
+              </span>
+            </span>
+            <span
+              className={cn(
+                "shrink-0 text-xs font-semibold tabular-nums",
+                item.type === "INCOME" && "text-income",
+              )}
+            >
+              {formatSignedAmount(item.amount, item.type, locale)}
+            </span>
+
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  setChoosing(item);
+                }}
+                className="min-h-touch shrink-0 rounded-full border px-3 text-xs font-medium text-primary"
+              >
+                Elegir cuenta
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {due.count > due.items.length && (
+        <Link
+          href="/recurring"
+          className="flex items-center gap-0.5 text-xs text-muted-foreground"
+        >
+          y {due.count - due.items.length} más en Programados
+          <ChevronRight className="size-3.5" />
+        </Link>
+      )}
+
+      {choosing !== null && (
+        <AcceptRuleDrawer
+          open
+          onOpenChange={(open) => {
+            if (!open) setChoosing(null);
+          }}
+          spaceId={spaceId}
+          locale={locale}
+          rule={{
+            id: choosing.id,
+            title:
+              choosing.description ?? choosing.categoryName ?? "Programado",
+            amount: choosing.amount,
+            dueCount: choosing.dueCount,
+          }}
+        />
       )}
     </Card>
   );

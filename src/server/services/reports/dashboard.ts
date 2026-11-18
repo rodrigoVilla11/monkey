@@ -11,6 +11,7 @@ import type {
   AccountBalanceSummary,
   CategoryBreakdownItem,
   DashboardResponse,
+  DueRulesSummary,
   MemberBreakdownItem,
   MonthSummary,
   NetWorth,
@@ -26,6 +27,9 @@ import {
   type DateRange,
 } from "@/shared/dates";
 import { convert, money } from "@/shared/money";
+import { occurrencesUpTo } from "@/shared/recurrence";
+
+import { specOf } from "../recurring";
 
 /**
  * Dashboard.
@@ -307,6 +311,70 @@ const pendingTransactions = async (db: ScopedDb): Promise<PendingSummary> => {
   };
 };
 
+/**
+ * Programados sin cuenta que ya vencieron.
+ *
+ * El job no los materializa —no hay dónde asentar el movimiento—, así que no
+ * aparecen entre los pendientes: son reglas esperando que alguien elija la
+ * cuenta. Se listan los más atrasados primero. `dueCount` dice cuántas
+ * ocurrencias se juntaron, con el mismo tope por corrida que aplica el job.
+ */
+const DUE_RULES_LIMIT = 5;
+
+const dueRules = async (
+  db: ScopedDb,
+  today: CalendarDate,
+): Promise<DueRulesSummary> => {
+  const where = {
+    isActive: true,
+    accountId: null,
+    nextRunDate: { lte: fromCalendarDate(today) },
+  };
+
+  const [count, rows] = await Promise.all([
+    db.recurringRule.count({ where }),
+    db.recurringRule.findMany({
+      where,
+      orderBy: { nextRunDate: "asc" },
+      take: DUE_RULES_LIMIT,
+      select: {
+        id: true,
+        type: true,
+        amountMinor: true,
+        currency: true,
+        description: true,
+        frequency: true,
+        interval: true,
+        byMonthDay: true,
+        byWeekday: true,
+        byMonth: true,
+        startDate: true,
+        endDate: true,
+        maxOccurrences: true,
+        nextRunDate: true,
+        category: { select: { name: true, color: true } },
+      },
+    }),
+  ]);
+
+  return {
+    count,
+    items: rows.map((row) => {
+      const dueDate = toCalendarDate(row.nextRunDate);
+      return {
+        id: row.id,
+        type: row.type as "INCOME" | "EXPENSE",
+        amount: dto(row.amountMinor, row.currency),
+        description: row.description,
+        categoryName: row.category?.name ?? null,
+        categoryColor: row.category?.color ?? null,
+        dueDate,
+        dueCount: occurrencesUpTo(specOf(row), dueDate, today, 60).dates.length,
+      };
+    }),
+  };
+};
+
 export const getDashboard = async (
   db: ScopedDb,
   space: { readonly primaryCurrency: string; readonly timezone: string },
@@ -329,6 +397,7 @@ export const getDashboard = async (
     budgets,
     reminders,
     pending,
+    due,
   ] = await Promise.all([
     summarize(db, current, space.primaryCurrency),
     summarize(db, previous, space.primaryCurrency),
@@ -339,6 +408,7 @@ export const getDashboard = async (
     budgetSummary(db, viewerTimezone, space.primaryCurrency),
     goalReminders(db, viewerTimezone),
     pendingTransactions(db),
+    dueRules(db, today),
   ]);
 
   return {
@@ -352,6 +422,7 @@ export const getDashboard = async (
     budgets,
     goalReminders: reminders,
     pendingTransactions: pending,
+    dueRules: due,
   };
 };
 

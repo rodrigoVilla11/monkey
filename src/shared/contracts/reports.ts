@@ -98,6 +98,31 @@ export interface PendingSummary {
   readonly items: readonly PendingTransactionItem[];
 }
 
+/**
+ * Programado sin cuenta que ya venció.
+ *
+ * No es un movimiento: todavía no existe, porque sin cuenta no hay dónde
+ * asentarlo. Es la regla esperando que alguien diga de qué cuenta salió la
+ * plata; al elegirla se materializan las ocurrencias vencidas, confirmadas.
+ */
+export interface DueRuleItem {
+  readonly id: string;
+  readonly type: "INCOME" | "EXPENSE";
+  readonly amount: MoneyDTO;
+  readonly description: string | null;
+  readonly categoryName: string | null;
+  readonly categoryColor: string | null;
+  /** La ocurrencia vencida más antigua. */
+  readonly dueDate: string;
+  /** Cuántas ocurrencias vencidas acumula; más de una si se dejó pasar. */
+  readonly dueCount: number;
+}
+
+export interface DueRulesSummary {
+  readonly count: number;
+  readonly items: readonly DueRuleItem[];
+}
+
 export interface MemberBreakdownItem {
   readonly userId: string | null;
   readonly name: string;
@@ -124,4 +149,6 @@ export interface DashboardResponse {
   readonly goalReminders: readonly GoalReminder[];
   /** Movimientos por confirmar. `count: 0` si no hay ninguno. */
   readonly pendingTransactions: PendingSummary;
+  /** Programados sin cuenta ya vencidos, a la espera de que se elija una. */
+  readonly dueRules: DueRulesSummary;
 }

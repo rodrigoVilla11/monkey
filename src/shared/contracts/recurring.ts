@@ -26,20 +26,34 @@ export const RECURRENCE_FREQUENCIES = [
   "YEARLY",
 ] as const;
 
+const positiveAmount = amountMinorSchema.refine(
+  // El guard de dígitos no sobra: Zod corre los refinements aunque el regex
+  // base ya haya fallado, y `BigInt("1.5")` lanza un SyntaxError.
+  (value) => /^\d+$/.test(value) && BigInt(value) > 0n,
+  "El importe tiene que ser mayor que cero",
+);
+
+export const NO_ACCOUNT_AUTOPOST_MESSAGE =
+  "Sin cuenta, el movimiento no puede darse por hecho: se confirma al elegir la cuenta";
+
 const baseFields = {
-  accountId: cuidSchema,
+  /**
+   * `null` = la cuenta se elige al aceptar cada ocurrencia.
+   *
+   * Es para lo que se paga desde donde haya plata ese mes: la regla avisa que
+   * venció y en ese momento se dice de qué cuenta salió. Una regla así no
+   * puede darse por hecha sola (`autoPost`): no habría dónde asentar el
+   * movimiento. Un CHECK en la base lo respalda.
+   */
+  accountId: cuidSchema.nullable().optional(),
   categoryId: cuidSchema.nullable().optional(),
   /**
    * TRANSFER no: una regla no tiene cuenta de destino y generaría patas
    * sueltas. Un CHECK en la base lo respalda.
    */
   type: z.enum(["INCOME", "EXPENSE"]),
-  amountMinor: amountMinorSchema.refine(
-    // El guard de dígitos no sobra: Zod corre los refinements aunque el regex
-    // base ya haya fallado, y `BigInt("1.5")` lanza un SyntaxError.
-    (value) => /^\d+$/.test(value) && BigInt(value) > 0n,
-    "El importe tiene que ser mayor que cero",
-  ),
+  amountMinor: positiveAmount,
+  /** Si no viene: la de la cuenta, o la primaria del Space si no hay cuenta. */
   currency: z
     .string()
     .refine(isCurrencyCode, "Código de moneda ISO 4217 inválido")
@@ -94,23 +108,30 @@ export const createRecurringRuleRequestSchema = z
     for (const message of errors) {
       ctx.addIssue({ code: "custom", message });
     }
+
+    if ((value.accountId ?? null) === null && value.autoPost) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["autoPost"],
+        message: NO_ACCOUNT_AUTOPOST_MESSAGE,
+      });
+    }
   });
 
 /**
  * Edición. `startDate` y `frequency` se pueden cambiar, pero eso reancla la
  * serie: las ocurrencias ya materializadas no se tocan —son hechos económicos
  * pasados— y `nextRunDate` se recalcula desde la regla nueva.
+ *
+ * `accountId: null` saca la cuenta: a partir de ahí se elige al aceptar. El
+ * service verifica que la regla resultante no quede sin cuenta y dada por
+ * hecha a la vez.
  */
 export const updateRecurringRuleRequestSchema = z
   .object({
-    accountId: cuidSchema.optional(),
+    accountId: cuidSchema.nullable().optional(),
     categoryId: cuidSchema.nullable().optional(),
-    amountMinor: amountMinorSchema
-      .refine(
-        (value) => /^\d+$/.test(value) && BigInt(value) > 0n,
-        "El importe tiene que ser mayor que cero",
-      )
-      .optional(),
+    amountMinor: positiveAmount.optional(),
     description: z.string().trim().max(200).nullable().optional(),
     payee: z.string().trim().max(120).nullable().optional(),
     frequency: z.enum(RECURRENCE_FREQUENCIES).optional(),
@@ -129,11 +150,23 @@ export const updateRecurringRuleRequestSchema = z
     "Hay que mandar al menos un campo",
   );
 
+/**
+ * Aceptar las ocurrencias vencidas de una regla. `accountId` es obligatorio
+ * cuando la regla no tiene cuenta —es justamente el momento de elegirla— y se
+ * ignora cuando sí la tiene.
+ */
+export const acceptRecurringRuleRequestSchema = z.object({
+  accountId: cuidSchema.optional(),
+});
+
 export type CreateRecurringRuleRequest = z.infer<
   typeof createRecurringRuleRequestSchema
 >;
 export type UpdateRecurringRuleRequest = z.infer<
   typeof updateRecurringRuleRequestSchema
+>;
+export type AcceptRecurringRuleRequest = z.infer<
+  typeof acceptRecurringRuleRequestSchema
 >;
 
 export const recurringRuleFiltersSchema = z.object({
@@ -154,12 +187,13 @@ export interface RecurringRuleDTO {
   readonly amount: MoneyDTO;
   readonly description: string | null;
   readonly payee: string | null;
+  /** `null` = la cuenta se elige al aceptar cada ocurrencia. */
   readonly account: {
     readonly id: string;
     readonly name: string;
     readonly color: string | null;
     readonly icon: string | null;
-  };
+  } | null;
   readonly category: {
     readonly id: string;
     readonly name: string;

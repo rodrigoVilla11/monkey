@@ -3,9 +3,17 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { forSpace } from "@/server/db/scoped";
 import { systemClient } from "@/server/db/system";
 import { accountBalances } from "@/server/services/balances";
-import { createRecurringRule } from "@/server/services/recurring";
+import {
+  createRecurringRule,
+  getRecurringRule,
+  resolveAcceptAccount,
+  updateRecurringRule,
+} from "@/server/services/recurring";
 import { materializeDueRules } from "@/server/services/recurring/materialize";
-import type { CreateRecurringRuleRequest } from "@/shared/contracts/recurring";
+import type {
+  CreateRecurringRuleRequest,
+  UpdateRecurringRuleRequest,
+} from "@/shared/contracts/recurring";
 
 import { disconnect, resetDatabase, testDb } from "./helpers/db";
 
@@ -27,6 +35,7 @@ const TIMEZONE = "Europe/Madrid";
 interface Space {
   readonly spaceId: string;
   readonly userId: string;
+  readonly primaryCurrency: string;
   readonly accountId: string;
   readonly categoryId: string;
 }
@@ -76,6 +85,7 @@ const makeSpace = async (primaryCurrency = "EUR"): Promise<Space> => {
   return {
     spaceId: space.id,
     userId: user.id,
+    primaryCurrency,
     accountId: account.id,
     categoryId: category.id,
   };
@@ -89,7 +99,7 @@ const addRule = (
     createRecurringRule(
       forSpace(space.spaceId),
       tx,
-      { spaceId: space.spaceId },
+      { spaceId: space.spaceId, primaryCurrency: space.primaryCurrency },
       { userId: space.userId, name: "Rodrigo" },
       {
         accountId: space.accountId,
@@ -130,6 +140,200 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await disconnect();
+});
+
+const updateRule = (
+  space: Space,
+  id: string,
+  input: UpdateRecurringRuleRequest,
+): Promise<void> =>
+  systemClient().$transaction(async (tx) => {
+    await updateRecurringRule(forSpace(space.spaceId), tx, id, input);
+  });
+
+const addPesosAccount = async (space: Space): Promise<string> => {
+  const account = await forSpace(space.spaceId).account.create({
+    data: {
+      spaceId: space.spaceId,
+      name: "Pesos",
+      type: "CASH",
+      currency: "ARS",
+    },
+  });
+  return account.id;
+};
+
+describe("sin cuenta: la cuenta se elige al aceptar", () => {
+  it("no puede darse por hecha: no habría dónde asentarla", async () => {
+    const space = await makeSpace();
+
+    await expect(
+      addRule(space, { accountId: null, autoPost: true }),
+    ).rejects.toThrow(/no puede darse por hecho/);
+  });
+
+  it("el barrido la deja esperando: ni falla ni avanza", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space, { accountId: null, autoPost: false });
+
+    const report = await materializeDueRules({
+      spaceId: space.spaceId,
+      until: "2026-03-15",
+    });
+
+    expect(report.rulesFailed).toBe(0);
+    expect(report.transactionsCreated).toBe(0);
+    expect(await materialized(space.spaceId)).toEqual([]);
+
+    const rule = await getRecurringRule(forSpace(space.spaceId), ruleId);
+    expect(rule.account).toBeNull();
+    expect(rule.nextRunDate).toBe("2026-01-01");
+    // Toma la moneda primaria del Space, que no hay cuenta de la que sacarla.
+    expect(rule.amount.currency).toBe("EUR");
+  });
+
+  it("aceptar eligiendo cuenta materializa las vencidas ahí, confirmadas", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space, { accountId: null, autoPost: false });
+
+    const { accountId } = await resolveAcceptAccount(
+      forSpace(space.spaceId),
+      ruleId,
+      space.accountId,
+    );
+    const report = await materializeDueRules({
+      spaceId: space.spaceId,
+      ruleId,
+      until: "2026-03-15",
+      post: true,
+      accountId,
+    });
+
+    expect(report.transactionsCreated).toBe(3);
+    const rows = await testDb.transaction.findMany({
+      where: { spaceId: space.spaceId, recurringRuleId: ruleId },
+      select: { accountId: true, status: true },
+    });
+    expect(rows).toHaveLength(3);
+    expect(
+      rows.every(
+        (row) => row.accountId === space.accountId && row.status === "CLEARED",
+      ),
+    ).toBe(true);
+
+    // Y la regla avanzó: la próxima ya no está vencida.
+    const rule = await getRecurringRule(forSpace(space.spaceId), ruleId);
+    expect(rule.nextRunDate).toBe("2026-04-01");
+    expect(rule.occurrencesCreated).toBe(3);
+  });
+
+  it("aceptar sin decir la cuenta se rechaza, igual que una cuenta en otra moneda", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space, { accountId: null, autoPost: false });
+
+    await expect(
+      resolveAcceptAccount(forSpace(space.spaceId), ruleId, undefined),
+    ).rejects.toThrow(/elegí de qué cuenta/);
+
+    const pesos = await addPesosAccount(space);
+    await expect(
+      resolveAcceptAccount(forSpace(space.spaceId), ruleId, pesos),
+    ).rejects.toThrow(/ARS/);
+  });
+
+  it("con cuenta en la regla, la que venga al aceptar se ignora", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space);
+
+    const resolved = await resolveAcceptAccount(
+      forSpace(space.spaceId),
+      ruleId,
+      "cualquier-cosa",
+    );
+
+    expect(resolved.accountId).toBeUndefined();
+  });
+});
+
+describe("edición", () => {
+  it("sacar la cuenta exige que la regla no se dé por hecho", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space); // autoPost: true
+
+    await expect(
+      updateRule(space, ruleId, { accountId: null }),
+    ).rejects.toThrow(/no puede darse por hecho/);
+
+    await updateRule(space, ruleId, { accountId: null, autoPost: false });
+    const rule = await getRecurringRule(forSpace(space.spaceId), ruleId);
+    expect(rule.account).toBeNull();
+    expect(rule.autoPost).toBe(false);
+  });
+
+  it("la cuenta nueva tiene que estar en la moneda del programado", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space);
+    const pesos = await addPesosAccount(space);
+
+    await expect(
+      updateRule(space, ruleId, { accountId: pesos }),
+    ).rejects.toThrow(/ARS/);
+  });
+
+  it("cambiar el patrón no vuelve atrás ni cuenta de más", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space); // mensual el 1, desde enero
+    await materializeDueRules({ spaceId: space.spaceId, until: "2026-03-15" });
+
+    // Pasa a cobrarse el 15. La próxima que ya tenía era el 1 de abril: la
+    // primera del patrón nuevo que no es anterior es el 15 de abril, no el 15
+    // de enero (que "revencería" tres meses ya generados).
+    await updateRule(space, ruleId, { byMonthDay: 15 });
+
+    const rule = await getRecurringRule(forSpace(space.spaceId), ruleId);
+    expect(rule.nextRunDate).toBe("2026-04-15");
+    expect(rule.occurrencesCreated).toBe(3);
+
+    await materializeDueRules({ spaceId: space.spaceId, until: "2026-04-20" });
+    expect((await materialized(space.spaceId)).map((row) => row.date)).toEqual([
+      "2026-01-01",
+      "2026-02-01",
+      "2026-03-01",
+      "2026-04-15",
+    ]);
+    expect(
+      (await getRecurringRule(forSpace(space.spaceId), ruleId))
+        .occurrencesCreated,
+    ).toBe(4);
+  });
+
+  it("cambiar la descripción o el importe no mueve la serie", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space);
+    await materializeDueRules({ spaceId: space.spaceId, until: "2026-02-15" });
+
+    await updateRule(space, ruleId, {
+      description: "Alquiler nuevo",
+      amountMinor: "99000",
+    });
+
+    const rule = await getRecurringRule(forSpace(space.spaceId), ruleId);
+    expect(rule.nextRunDate).toBe("2026-03-01");
+    expect(rule.description).toBe("Alquiler nuevo");
+    expect(rule.amount.amountMinor).toBe("99000");
+  });
+
+  it("un patrón sin ocurrencias por delante termina la regla", async () => {
+    const space = await makeSpace();
+    const ruleId = await addRule(space);
+    await materializeDueRules({ spaceId: space.spaceId, until: "2026-03-15" });
+
+    await updateRule(space, ruleId, { endDate: "2026-03-20" });
+
+    const rule = await getRecurringRule(forSpace(space.spaceId), ruleId);
+    expect(rule.isActive).toBe(false);
+    expect(rule.nextRunDate).toBeNull();
+  });
 });
 
 describe("recuperación de atrasos", () => {

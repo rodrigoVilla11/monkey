@@ -83,13 +83,22 @@ export interface MaterializeOptions {
    * y hacerlas nacer pendientes lo obligaría a confirmar lo mismo dos veces.
    */
   readonly post?: boolean;
+  /**
+   * Cuenta donde asentar las ocurrencias de una regla SIN cuenta. Solo tiene
+   * sentido junto con `ruleId` y ya validada (ver `resolveAcceptAccount`).
+   *
+   * Sin esto, las reglas sin cuenta quedan fuera del barrido: no hay dónde
+   * asentar el movimiento, así que esperan a que alguien las acepte eligiendo
+   * una. No se cuentan como fallo porque no fallaron: están esperando.
+   */
+  readonly accountId?: string;
   readonly logger?: Logger;
 }
 
 interface RuleRow {
   id: string;
   spaceId: string;
-  accountId: string;
+  accountId: string | null;
   categoryId: string | null;
   createdByUserId: string | null;
   createdByName: string;
@@ -163,6 +172,10 @@ export const materializeDueRules = async (
         isActive: true,
         deletedAt: null,
         nextRunDate: { lte: fromCalendarDate(until) },
+        // Las reglas sin cuenta esperan a que alguien la elija al aceptar.
+        ...(options.accountId === undefined
+          ? { accountId: { not: null } }
+          : {}),
         ...(options.spaceId !== undefined ? { spaceId: options.spaceId } : {}),
         ...(options.ruleId !== undefined ? { id: options.ruleId } : {}),
         ...(cursor !== undefined ? { id: { gt: cursor } } : {}),
@@ -179,7 +192,12 @@ export const materializeDueRules = async (
       rulesExamined += 1;
 
       try {
-        const result = await materializeRule(rule, until, options.post);
+        const result = await materializeRule(
+          rule,
+          until,
+          options.post,
+          options.accountId,
+        );
 
         transactionsCreated += result.created;
         if (result.created > 0) rulesAdvanced += 1;
@@ -249,7 +267,15 @@ const materializeRule = async (
   rule: RuleRow,
   until: CalendarDate,
   post?: boolean,
+  chosenAccountId?: string,
 ): Promise<RuleResult> => {
+  // La cuenta de la regla o, si no tiene, la elegida al aceptar. Sin ninguna
+  // no hay dónde asentar el movimiento: se deja esperando, no es un fallo.
+  const accountId = rule.accountId ?? chosenAccountId ?? null;
+  if (accountId === null) {
+    return { created: 0, truncated: false, completed: false };
+  }
+
   const spec = specOf(rule);
   const window = occurrencesUpTo(
     spec,
@@ -289,7 +315,7 @@ const materializeRule = async (
     await tx.transaction.createMany({
       data: rows.map(({ date, conversion }) => ({
         spaceId: rule.spaceId,
-        accountId: rule.accountId,
+        accountId,
         categoryId: rule.categoryId,
         createdByUserId: rule.createdByUserId,
         createdByName: rule.createdByName,

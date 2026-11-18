@@ -6,6 +6,7 @@ import {
   Check,
   Loader2,
   Pause,
+  Pencil,
   Play,
   Plus,
   Trash2,
@@ -15,6 +16,7 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { AcceptRuleDrawer } from "@/components/recurring/accept-rule-drawer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -35,9 +37,11 @@ import { useAccounts, useCategories } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import type { CategoryTreeNode } from "@/shared/contracts/categories";
 import {
   RECURRENCE_FREQUENCIES,
   type RecurringRuleDTO,
+  type UpdateRecurringRuleRequest,
 } from "@/shared/contracts/recurring";
 import { getCurrencyExponent } from "@/shared/currency";
 import {
@@ -46,13 +50,13 @@ import {
   formatCalendarDate,
   todayIn,
 } from "@/shared/dates";
+import { money, toDecimalString } from "@/shared/money";
 import { scheduledTotals } from "@/shared/recurring-totals";
 import { hasAtLeast } from "@/shared/roles";
 
-const FREQUENCY_LABELS: Record<
-  (typeof RECURRENCE_FREQUENCIES)[number],
-  string
-> = {
+type Frequency = (typeof RECURRENCE_FREQUENCIES)[number];
+
+const FREQUENCY_LABELS: Record<Frequency, string> = {
   DAILY: "Diario",
   WEEKLY: "Semanal",
   MONTHLY: "Mensual",
@@ -69,6 +73,10 @@ const PERIODS = [
   { months: 3, chip: "3 meses", heading: "los próximos 3 meses" },
   { months: 12, chip: "12 meses", heading: "los próximos 12 meses" },
 ] as const;
+
+/** Lo que se muestra como nombre de una regla. */
+const ruleTitle = (rule: RecurringRuleDTO): string =>
+  rule.description ?? rule.category?.name ?? "Sin descripción";
 
 /**
  * Movimientos programados.
@@ -255,11 +263,7 @@ export default function RecurringPage() {
         </div>
       )}
 
-      <NewRuleSheet
-        open={showNew}
-        onOpenChange={setShowNew}
-        spaceId={spaceId}
-      />
+      <RuleSheet open={showNew} onOpenChange={setShowNew} spaceId={spaceId} />
     </div>
   );
 }
@@ -281,6 +285,12 @@ function RuleCard({
   const invalidate = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
   };
+
+  const [editing, setEditing] = useState(false);
+  // Cambia cada vez que se abre: así la hoja arranca con los datos actuales de
+  // la regla y no con los de la primera vez que se editó.
+  const [editSession, setEditSession] = useState(0);
+  const [choosingAccount, setChoosingAccount] = useState(false);
 
   const toggle = useMutation({
     mutationFn: () =>
@@ -315,6 +325,11 @@ function RuleCard({
       );
       await invalidate();
     },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof ApiError ? error.message : "No se pudo aceptar",
+      );
+    },
   });
 
   /**
@@ -342,13 +357,15 @@ function RuleCard({
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
-            {rule.description ?? rule.category?.name ?? "Sin descripción"}
-          </p>
+          <p className="truncate text-sm font-medium">{ruleTitle(rule)}</p>
           <p className="text-xs text-muted-foreground">{rule.summary}</p>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {rule.account.name}
-            {!rule.autoPost && " · nace pendiente de revisar"}
+            {rule.account === null
+              ? "La cuenta se elige al aceptar"
+              : rule.account.name}
+            {rule.account !== null &&
+              !rule.autoPost &&
+              " · nace pendiente de revisar"}
           </p>
         </div>
 
@@ -416,13 +433,15 @@ function RuleCard({
       </p>
 
       {canEdit && (
-        <div className="mt-2 flex gap-4">
+        <div className="mt-2 flex flex-wrap gap-4">
           {isDue && (
             <button
               type="button"
               disabled={accept.isPending}
               onClick={() => {
-                accept.mutate();
+                // Sin cuenta, aceptar es elegirla: se abre el selector.
+                if (rule.account === null) setChoosingAccount(true);
+                else accept.mutate();
               }}
               className="flex min-h-touch items-center gap-1.5 text-xs font-medium text-primary disabled:opacity-40"
             >
@@ -431,9 +450,21 @@ function RuleCard({
               ) : (
                 <Check className="size-3.5" />
               )}
-              Aceptar
+              {rule.account === null ? "Elegir cuenta y aceptar" : "Aceptar"}
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setEditSession((value) => value + 1);
+              setEditing(true);
+            }}
+            className="flex min-h-touch items-center gap-1.5 text-xs text-muted-foreground"
+          >
+            <Pencil className="size-3.5" />
+            Editar
+          </button>
 
           <button
             type="button"
@@ -462,129 +493,297 @@ function RuleCard({
           </button>
         </div>
       )}
+
+      {canEdit && (
+        <RuleSheet
+          key={editSession}
+          open={editing}
+          onOpenChange={setEditing}
+          spaceId={spaceId}
+          rule={rule}
+        />
+      )}
+
+      {canEdit && rule.account === null && (
+        <AcceptRuleDrawer
+          open={choosingAccount}
+          onOpenChange={setChoosingAccount}
+          spaceId={spaceId}
+          locale={locale}
+          rule={{ id: rule.id, title: ruleTitle(rule), amount: rule.amount }}
+        />
+      )}
     </Card>
   );
 }
 
-function NewRuleSheet({
+/**
+ * Lo que cambió respecto de la regla guardada, y nada más.
+ *
+ * Mandar el formulario entero reanclaría la serie en cada edición —tocar la
+ * descripción recalcularía `nextRunDate`— y obligaría al servidor a adivinar
+ * qué quiso cambiar quien editó. Con el diff, cambiar el importe es cambiar el
+ * importe.
+ */
+const buildPatch = (
+  rule: RecurringRuleDTO,
+  form: {
+    amountMinor: string;
+    description: string | null;
+    categoryId: string | null;
+    accountId: string | null;
+    frequency: Frequency;
+    startDate: string;
+    maxOccurrences: number | null;
+    autoPost: boolean;
+  },
+): UpdateRecurringRuleRequest => {
+  const patch: UpdateRecurringRuleRequest = {};
+
+  if (form.amountMinor !== rule.amount.amountMinor) {
+    patch.amountMinor = form.amountMinor;
+  }
+  if (form.description !== rule.description) {
+    patch.description = form.description;
+  }
+  if (form.categoryId !== (rule.category?.id ?? null)) {
+    patch.categoryId = form.categoryId;
+  }
+  if (form.accountId !== (rule.account?.id ?? null)) {
+    patch.accountId = form.accountId;
+  }
+  if (form.frequency !== rule.frequency) patch.frequency = form.frequency;
+  if (form.startDate !== rule.startDate) patch.startDate = form.startDate;
+  if (patch.frequency !== undefined || patch.startDate !== undefined) {
+    // El día del mes sale de la fecha de inicio; en diario y semanal no aplica.
+    patch.byMonthDay =
+      form.frequency === "MONTHLY" || form.frequency === "YEARLY"
+        ? Number(form.startDate.slice(8, 10))
+        : null;
+  }
+  if (form.maxOccurrences !== rule.maxOccurrences) {
+    patch.maxOccurrences = form.maxOccurrences;
+  }
+  if (form.autoPost !== rule.autoPost) patch.autoPost = form.autoPost;
+
+  return patch;
+};
+
+/**
+ * Alta y edición de un programado, en la misma hoja.
+ *
+ * Al editar, el tipo y la moneda quedan fijos: cambiarlos redefiniría lo que
+ * significan el importe y las ocurrencias ya generadas. Lo demás se puede
+ * tocar; si cambia el patrón (frecuencia o fecha de inicio), la serie se
+ * reancla hacia adelante sin tocar lo ya materializado.
+ */
+function RuleSheet({
   open,
   onOpenChange,
   spaceId,
+  rule,
 }: {
   open: boolean;
   onOpenChange: (value: boolean) => void;
   spaceId: string;
+  rule?: RecurringRuleDTO;
 }) {
   const queryClient = useQueryClient();
   const session = useSession();
+  const { space } = useActiveSpace();
   const timezone = session.data?.timezone ?? "Europe/Madrid";
+  const primaryCurrency = space?.primaryCurrency ?? "EUR";
+  const isEdit = rule !== undefined;
 
-  const [type, setType] = useState<"EXPENSE" | "INCOME">("EXPENSE");
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
-  const [accountId, setAccountId] = useState<string | null>(null);
-  const [categoryId, setCategoryId] = useState<string | null>(null);
-  const [frequency, setFrequency] =
-    useState<(typeof RECURRENCE_FREQUENCIES)[number]>("MONTHLY");
-  const [startDate, setStartDate] = useState("");
-  const [autoPost, setAutoPost] = useState(true);
-  const [times, setTimes] = useState<string | null>(null);
+  const [type, setType] = useState<"EXPENSE" | "INCOME">(
+    rule?.type ?? "EXPENSE",
+  );
+  const [amount, setAmount] = useState(
+    rule === undefined
+      ? ""
+      : toDecimalString(
+          money(BigInt(rule.amount.amountMinor), rule.amount.currency),
+        ),
+  );
+  const [description, setDescription] = useState(rule?.description ?? "");
+  /**
+   * `undefined` = sin elegir (manda la principal, como al cargar un movimiento
+   * suelto); `null` = la cuenta se elige al aceptar cada ocurrencia.
+   */
+  const [accountChoice, setAccountChoice] = useState<string | null | undefined>(
+    rule === undefined ? undefined : (rule.account?.id ?? null),
+  );
+  const [categoryId, setCategoryId] = useState<string | null>(
+    rule?.category?.id ?? null,
+  );
+  const [frequency, setFrequency] = useState<Frequency>(
+    rule?.frequency ?? "MONTHLY",
+  );
+  const [startDate, setStartDate] = useState(rule?.startDate ?? "");
+  const [autoPost, setAutoPost] = useState(rule?.autoPost ?? true);
+  // Las que FALTAN, no las del acuerdo: es lo que se pregunta y lo que se edita.
+  const [times, setTimes] = useState<string | null>(
+    rule?.maxOccurrences == null
+      ? null
+      : String(Math.max(0, rule.maxOccurrences - rule.occurrencesCreated)),
+  );
 
   const accounts = useAccounts(spaceId);
   const categories = useCategories(spaceId, type);
 
-  const active = accounts.data?.filter((a) => !a.isArchived) ?? [];
-  // Sin elección explícita manda la principal, igual que al cargar un
-  // movimiento suelto.
+  const active = (accounts.data ?? []).filter(
+    (a) =>
+      !a.isArchived &&
+      // Al editar, la moneda ya está fijada: solo cuentas en esa moneda.
+      (rule === undefined || a.currency === rule.amount.currency),
+  );
   const account =
-    active.find((a) => a.id === accountId) ??
-    active.find((a) => a.isDefault) ??
-    active[0] ??
-    null;
-  const currency = account?.currency ?? "EUR";
+    accountChoice === null
+      ? null
+      : (active.find((a) => a.id === accountChoice) ??
+        active.find((a) => a.isDefault) ??
+        active[0] ??
+        null);
+  const noAccount = accountChoice === null;
+
+  const currency =
+    rule?.amount.currency ?? account?.currency ?? primaryCurrency;
   const exponent = getCurrencyExponent(currency);
   const effectiveStart = startDate === "" ? todayIn(timezone) : startDate;
+  // Sin cuenta no hay dónde asentar el movimiento: no puede darse por hecho.
+  const effectiveAutoPost = noAccount ? false : autoPost;
 
-  const create = useMutation({
-    mutationFn: () =>
-      api.post(`/spaces/${spaceId}/recurring`, {
-        accountId: account?.id,
+  // La categoría elegida puede ser una subcategoría: su raíz es la que se
+  // marca arriba, y abajo se despliegan las hermanas.
+  const roots = categories.data ?? [];
+  const selectedRoot = roots.find(
+    (root) =>
+      root.id === categoryId ||
+      root.children.some((child) => child.id === categoryId),
+  );
+
+  const save = useMutation({
+    mutationFn: async (): Promise<"created" | "updated" | "unchanged"> => {
+      const amountMinor = toMinor(amount, exponent);
+      const trimmed = description.trim();
+      const maxOccurrences =
+        times === null || times === ""
+          ? null
+          : (rule?.occurrencesCreated ?? 0) + Number(times);
+
+      if (rule === undefined) {
+        await api.post(`/spaces/${spaceId}/recurring`, {
+          accountId: account?.id ?? null,
+          categoryId,
+          type,
+          amountMinor,
+          // Sin cuenta de la que tomarla, la moneda va explícita.
+          ...(noAccount ? { currency } : {}),
+          frequency,
+          interval: 1,
+          startDate: effectiveStart,
+          autoPost: effectiveAutoPost,
+          isActive: true,
+          ...(trimmed !== "" ? { description: trimmed } : {}),
+          // `null` = indefinido, que es lo que la columna ya significaba.
+          ...(maxOccurrences !== null ? { maxOccurrences } : {}),
+          // El día del mes sale de la fecha de inicio: pedirlo aparte sería
+          // pedir dos veces lo mismo y dejar que se contradigan.
+          ...(frequency === "MONTHLY" || frequency === "YEARLY"
+            ? { byMonthDay: Number(effectiveStart.slice(8, 10)) }
+            : {}),
+        });
+        return "created";
+      }
+
+      const patch = buildPatch(rule, {
+        amountMinor,
+        description: trimmed === "" ? null : trimmed,
         categoryId,
-        type,
-        amountMinor: toMinor(amount, exponent),
+        accountId: account?.id ?? null,
         frequency,
-        interval: 1,
         startDate: effectiveStart,
-        autoPost,
-        isActive: true,
-        ...(description.trim() !== ""
-          ? { description: description.trim() }
-          : {}),
-        // `null` = indefinido, que es lo que la columna ya significaba.
-        ...(times !== null && times !== ""
-          ? { maxOccurrences: Number(times) }
-          : {}),
-        // El día del mes sale de la fecha de inicio: pedirlo aparte sería
-        // pedir dos veces lo mismo y dejar que se contradigan.
-        ...(frequency === "MONTHLY" || frequency === "YEARLY"
-          ? { byMonthDay: Number(effectiveStart.slice(8, 10)) }
-          : {}),
-      }),
-    onSuccess: async () => {
-      toast.success("Movimiento programado");
-      setAmount("");
-      setDescription("");
-      setCategoryId(null);
-      setTimes(null);
+        maxOccurrences,
+        autoPost: effectiveAutoPost,
+      });
+      if (Object.keys(patch).length === 0) return "unchanged";
+
+      await api.patch(`/spaces/${spaceId}/recurring/${rule.id}`, patch);
+      return "updated";
+    },
+    onSuccess: async (result) => {
+      toast.success(
+        result === "created"
+          ? "Movimiento programado"
+          : result === "updated"
+            ? "Programado actualizado"
+            : "No había nada que cambiar",
+      );
+      if (!isEdit) {
+        setAmount("");
+        setDescription("");
+        setCategoryId(null);
+        setTimes(null);
+      }
       onOpenChange(false);
       await queryClient.invalidateQueries({ queryKey: spaceScopeKey(spaceId) });
     },
     onError: (error: unknown) => {
       toast.error(
-        error instanceof ApiError ? error.message : "No se pudo programar",
+        error instanceof ApiError
+          ? error.message
+          : isEdit
+            ? "No se pudo guardar"
+            : "No se pudo programar",
       );
     },
   });
 
   const canSave =
-    account !== null &&
+    (account !== null || noAccount) &&
     /^\d+([.,]\d+)?$/.test(amount) &&
     Number(amount.replace(",", ".")) > 0 &&
     // Con "un número de veces" elegido pero vacío no se guarda: sería un
     // límite que nadie puso.
     (times === null || (times !== "" && Number(times) > 0)) &&
-    !create.isPending;
+    !save.isPending;
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="max-h-[90dvh] pb-safe-bottom">
         <DrawerHeader className="text-left">
-          <DrawerTitle>Nuevo programado</DrawerTitle>
+          <DrawerTitle>
+            {isEdit ? "Editar programado" : "Nuevo programado"}
+          </DrawerTitle>
         </DrawerHeader>
 
         <DrawerBody className="space-y-4">
-          <div className="flex rounded-full bg-secondary p-1">
-            {(["EXPENSE", "INCOME"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => {
-                  setType(option);
-                  setCategoryId(null);
-                }}
-                className={cn(
-                  "min-h-touch flex-1 rounded-full text-sm font-medium",
-                  type === option
-                    ? option === "EXPENSE"
-                      ? "bg-expense text-expense-foreground"
-                      : "bg-income text-income-foreground"
-                    : "text-muted-foreground",
-                )}
-              >
-                {option === "EXPENSE" ? "Gasto" : "Ingreso"}
-              </button>
-            ))}
-          </div>
+          {/* El tipo no se edita: cambiarlo redefiniría las ocurrencias ya
+              generadas y las categorías elegidas. */}
+          {!isEdit && (
+            <div className="flex rounded-full bg-secondary p-1">
+              {(["EXPENSE", "INCOME"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => {
+                    if (option !== type) setCategoryId(null);
+                    setType(option);
+                  }}
+                  className={cn(
+                    "min-h-touch flex-1 rounded-full text-sm font-medium",
+                    type === option
+                      ? option === "EXPENSE"
+                        ? "bg-expense text-expense-foreground"
+                        : "bg-income text-income-foreground"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {option === "EXPENSE" ? "Gasto" : "Ingreso"}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="rule-amount">Importe ({currency})</Label>
@@ -637,7 +836,9 @@ function NewRuleSheet({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="rule-start">Primera vez</Label>
+            <Label htmlFor="rule-start">
+              {isEdit ? "Fecha de referencia" : "Primera vez"}
+            </Label>
             <Input
               id="rule-start"
               type="date"
@@ -648,8 +849,9 @@ function NewRuleSheet({
               className="min-h-touch"
             />
             <p className="text-xs text-muted-foreground">
-              Si ponés una fecha pasada, se generan también las que ya
-              vencieron, cada una con su fecha.
+              {isEdit
+                ? "Cambiarla, o la frecuencia, mueve las próximas fechas. Lo ya generado no se toca."
+                : "Si ponés una fecha pasada, se generan también las que ya vencieron, cada una con su fecha."}
             </p>
           </div>
 
@@ -665,7 +867,7 @@ function NewRuleSheet({
                 { label: "Indefinido", value: null },
                 { label: "Un número de veces", value: "" },
               ].map((option) => {
-                const active = (times === null) === (option.value === null);
+                const isActive = (times === null) === (option.value === null);
 
                 return (
                   <button
@@ -674,10 +876,10 @@ function NewRuleSheet({
                     onClick={() => {
                       setTimes(option.value);
                     }}
-                    aria-pressed={active}
+                    aria-pressed={isActive}
                     className={cn(
                       "min-h-touch rounded-full border px-3 text-sm",
-                      active &&
+                      isActive &&
                         "border-primary bg-primary text-primary-foreground",
                     )}
                   >
@@ -721,56 +923,98 @@ function NewRuleSheet({
                   key={option.id}
                   type="button"
                   onClick={() => {
-                    setAccountId(option.id);
+                    setAccountChoice(option.id);
                   }}
-                  aria-pressed={option.id === account?.id}
+                  aria-pressed={!noAccount && option.id === account?.id}
                   className={cn(
                     "min-h-touch shrink-0 rounded-xl border px-3 py-2 text-sm",
-                    option.id === account?.id && "ring-2 ring-primary",
+                    !noAccount &&
+                      option.id === account?.id &&
+                      "ring-2 ring-primary",
                   )}
                 >
                   {option.name}
                 </button>
               ))}
+              {/**
+               * Para lo que se paga desde donde haya plata ese mes. La regla
+               * avisa que venció y en ese momento se dice de qué cuenta salió.
+               */}
+              <button
+                type="button"
+                onClick={() => {
+                  setAccountChoice(null);
+                }}
+                aria-pressed={noAccount}
+                className={cn(
+                  "min-h-touch shrink-0 rounded-xl border border-dashed px-3 py-2 text-sm",
+                  noAccount && "ring-2 ring-primary",
+                )}
+              >
+                Elegir al aceptar
+              </button>
             </div>
+            {noAccount && (
+              <p className="text-xs text-muted-foreground">
+                Cuando venza va a aparecer en el inicio para que elijas de qué
+                cuenta salió. Hasta entonces no se registra nada.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
             <Label>Categoría</Label>
             <div className="flex flex-wrap gap-2">
-              {(categories.data ?? []).map((category) => (
+              {roots.map((root) => (
                 <button
-                  key={category.id}
+                  key={root.id}
                   type="button"
                   onClick={() => {
+                    // Tocar la raíz elegida la deselecciona, incluida la
+                    // subcategoría que tuviera.
                     setCategoryId(
-                      categoryId === category.id ? null : category.id,
+                      selectedRoot?.id === root.id ? null : root.id,
                     );
                   }}
-                  aria-pressed={categoryId === category.id}
+                  aria-pressed={selectedRoot?.id === root.id}
                   className={cn(
                     "min-h-touch rounded-full border px-3 text-sm",
-                    categoryId === category.id &&
+                    selectedRoot?.id === root.id &&
                       "border-primary bg-primary text-primary-foreground",
                   )}
                 >
-                  {category.name}
+                  {root.name}
                 </button>
               ))}
             </div>
+
+            {selectedRoot !== undefined && selectedRoot.children.length > 0 && (
+              <SubcategoryChips
+                root={selectedRoot}
+                selectedId={categoryId}
+                onSelect={setCategoryId}
+              />
+            )}
           </div>
 
-          <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
+          <div
+            className={cn(
+              "flex items-start justify-between gap-4 rounded-lg border p-3",
+              noAccount && "opacity-60",
+            )}
+          >
             <div className="min-w-0">
               <Label htmlFor="rule-autopost">Dar por hecho</Label>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Activado, el movimiento nace confirmado. Desactivado, queda
-                pendiente para que lo revises.
+                {noAccount
+                  ? "Sin cuenta no puede darse por hecho: se confirma al elegirla."
+                  : "Activado, el movimiento nace confirmado. Desactivado, queda pendiente para que lo revises."}
               </p>
             </div>
             <Switch
               id="rule-autopost"
-              checked={autoPost}
+              checked={effectiveAutoPost}
+              disabled={noAccount}
               onCheckedChange={setAutoPost}
             />
           </div>
@@ -779,11 +1023,13 @@ function NewRuleSheet({
             className="min-h-touch w-full"
             disabled={!canSave}
             onClick={() => {
-              create.mutate();
+              save.mutate();
             }}
           >
-            {create.isPending ? (
+            {save.isPending ? (
               <Loader2 className="size-4 animate-spin" />
+            ) : isEdit ? (
+              "Guardar cambios"
             ) : (
               "Programar"
             )}
@@ -791,5 +1037,50 @@ function NewRuleSheet({
         </DrawerBody>
       </DrawerContent>
     </Drawer>
+  );
+}
+
+/**
+ * Las subcategorías de la raíz elegida. "General" es la raíz misma: no todo
+ * gasto de "Transporte" es de una subcategoría concreta.
+ */
+function SubcategoryChips({
+  root,
+  selectedId,
+  onSelect,
+}: {
+  root: CategoryTreeNode;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const options = [
+    { id: root.id, name: "General" },
+    ...root.children.map((child) => ({ id: child.id, name: child.name })),
+  ];
+
+  return (
+    <div className="space-y-1.5 pl-3">
+      <span className="text-xs text-muted-foreground">
+        Subcategoría de {root.name}
+      </span>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => {
+              onSelect(option.id);
+            }}
+            aria-pressed={selectedId === option.id}
+            className={cn(
+              "min-h-touch rounded-full border px-3 text-xs",
+              selectedId === option.id && "border-primary bg-primary/10",
+            )}
+          >
+            {option.name}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

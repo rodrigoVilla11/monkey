@@ -41,11 +41,17 @@ export const POST = route<CreateRecurringRuleRequest, Params>(
     space: { minRole: "MEMBER" },
   },
   async ({ body, access, session, db, logger }) => {
+    // Sin cuenta en la regla, la moneda sale de la primaria del Space.
+    const space = await systemClient().space.findUniqueOrThrow({
+      where: { id: access.spaceId },
+      select: { primaryCurrency: true },
+    });
+
     const id = await systemClient().$transaction(async (tx) =>
       createRecurringRule(
         db,
         tx,
-        { spaceId: access.spaceId },
+        { spaceId: access.spaceId, primaryCurrency: space.primaryCurrency },
         { userId: access.userId, name: session.name },
         body,
       ),

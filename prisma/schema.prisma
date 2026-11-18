@@ -697,7 +697,10 @@ model BudgetAccount {
 model RecurringRule {
   id         String  @id @default(cuid(2))
   spaceId    String
-  accountId  String
+  /// Null = la cuenta se elige al aceptar cada ocurrencia. El job no toca
+  /// estas reglas: quedan vencidas hasta que alguien diga de dónde salió la
+  /// plata. Un CHECK impide combinarlo con autoPost.
+  accountId  String?
   categoryId String?
 
   createdByUserId String?
@@ -735,7 +738,7 @@ model RecurringRule {
   deletedAt DateTime?
 
   space     Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  account   Account   @relation(fields: [spaceId, accountId], references: [spaceId, id], onDelete: Restrict)
+  account   Account?  @relation(fields: [spaceId, accountId], references: [spaceId, id], onDelete: Restrict)
   category  Category? @relation(fields: [spaceId, categoryId], references: [spaceId, id], onDelete: Restrict)
   createdBy User?     @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 

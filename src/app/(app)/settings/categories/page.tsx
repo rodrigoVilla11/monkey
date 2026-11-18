@@ -29,6 +29,7 @@ import {
   type CategoryDTO,
   type CategoryTreeNode,
 } from "@/shared/contracts/categories";
+import { CATEGORY_ICON_CHOICES } from "@/shared/icon-catalog";
 import { hasAtLeast } from "@/shared/roles";
 
 /**
@@ -52,40 +53,7 @@ const KIND_LABEL: Record<(typeof CATEGORY_KINDS)[number], string> = {
 };
 
 /** Un puñado de íconos de lucide, agrupados por para qué suelen servir. */
-const ICONS = [
-  "ShoppingCart",
-  "Utensils",
-  "Coffee",
-  "Beer",
-  "House",
-  "Lamp",
-  "Droplet",
-  "Fuel",
-  "Car",
-  "Bus",
-  "Plane",
-  "HeartPulse",
-  "Pill",
-  "Dumbbell",
-  "GraduationCap",
-  "Book",
-  "MonitorPlay",
-  "PartyPopper",
-  "Gift",
-  "PawPrint",
-  "Shirt",
-  "Smartphone",
-  "Wifi",
-  "Hammer",
-  "Briefcase",
-  "Landmark",
-  "Receipt",
-  "Percent",
-  "PiggyBank",
-  "Wallet",
-  "HandHeart",
-  "CircleEllipsis",
-] as const;
+const ICONS = CATEGORY_ICON_CHOICES;
 
 const COLORS = [
   "#ef4444",

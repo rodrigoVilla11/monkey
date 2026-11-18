@@ -1,11 +1,12 @@
 import { errors } from "@/server/api/errors";
 import type { ScopedDb } from "@/server/db/scoped";
 import type { TransactionClient } from "@/server/services/audit/log";
-import type {
-  CreateRecurringRuleRequest,
-  RecurringRuleDTO,
-  RecurringRuleFilters,
-  UpdateRecurringRuleRequest,
+import {
+  NO_ACCOUNT_AUTOPOST_MESSAGE,
+  type CreateRecurringRuleRequest,
+  type RecurringRuleDTO,
+  type RecurringRuleFilters,
+  type UpdateRecurringRuleRequest,
 } from "@/shared/contracts/recurring";
 import {
   fromCalendarDate,
@@ -15,6 +16,7 @@ import {
 import {
   describeRecurrence,
   firstOccurrence,
+  occurrencesUpTo,
   validateRecurrence,
   type RecurrenceSpec,
 } from "@/shared/recurrence";
@@ -31,8 +33,8 @@ import {
  * regla del sistema y evaluarla en memoria en cada corrida.
  *
  * La contrapartida es que hay que recalcularlo en cada edición que toque el
- * patrón. Se hace en un solo lugar, `nextRunFor`, y hay un test que verifica
- * que editar una regla no desplace la serie.
+ * patrón. Se hace en un solo lugar, `reanchor`, y hay un test que verifica
+ * que editar una regla no desplace la serie ni vuelva atrás.
  */
 
 const SELECT = {
@@ -86,7 +88,7 @@ interface Row {
     name: string;
     color: string | null;
     icon: string | null;
-  };
+  } | null;
   category: {
     id: string;
     name: string;
@@ -182,24 +184,32 @@ export const getRecurringRule = async (
  * Es la misma comprobación que hace el alta de transacciones, y por el mismo
  * motivo: los IDs vienen del body y el cliente scopeado garantiza dónde nace la
  * fila, no que los IDs relacionados sean de ahí.
+ *
+ * Sin cuenta (`null`) no hay nada que verificar de ese lado y la moneda la
+ * decide quien llama.
  */
 const validateReferences = async (
   db: ScopedDb,
-  accountId: string,
+  accountId: string | null,
   categoryId: string | null | undefined,
   type: "INCOME" | "EXPENSE",
-): Promise<{ currency: string }> => {
-  const account = await db.account.findFirst({
-    where: { id: accountId },
-    select: { currency: true, isArchived: true },
-  });
+): Promise<{ currency: string | null }> => {
+  let currency: string | null = null;
 
-  if (account === null) throw errors.notFound("No se encontró la cuenta");
-  if (account.isArchived) {
-    throw errors.conflict(
-      "CONFLICT",
-      "No se puede programar un movimiento en una cuenta archivada",
-    );
+  if (accountId !== null) {
+    const account = await db.account.findFirst({
+      where: { id: accountId },
+      select: { currency: true, isArchived: true },
+    });
+
+    if (account === null) throw errors.notFound("No se encontró la cuenta");
+    if (account.isArchived) {
+      throw errors.conflict(
+        "CONFLICT",
+        "No se puede programar un movimiento en una cuenta archivada",
+      );
+    }
+    currency = account.currency;
   }
 
   if (categoryId != null) {
@@ -224,11 +234,11 @@ const validateReferences = async (
     }
   }
 
-  return { currency: account.currency };
+  return { currency };
 };
 
 /**
- * `nextRunDate` de una regla recién creada o reanclada.
+ * `nextRunDate` de una regla recién creada.
  *
  * Es la PRIMERA ocurrencia del patrón, aunque caiga en el pasado. Eso es lo que
  * permite crear una regla con `startDate` vieja para que el job rellene lo que
@@ -242,16 +252,50 @@ const nextRunFor = (spec: RecurrenceSpec): CalendarDate => {
   return firstOccurrence(spec);
 };
 
+/**
+ * `nextRunDate` de una regla cuyo patrón cambió.
+ *
+ * Es la primera ocurrencia del patrón NUEVO que no sea anterior al próximo
+ * vencimiento que ya tenía. Las ocurrencias ya materializadas no se tocan: son
+ * hechos económicos pasados. Y la serie no vuelve atrás: si el nuevo
+ * `nextRunDate` fuera la primera ocurrencia del patrón, mover el día del mes
+ * de una regla con un año de historia la haría "revencer" doce veces; el
+ * unique parcial descartaría las filas, pero `occurrencesCreated` las
+ * contaría igual y una regla con tope se cerraría antes de tiempo.
+ *
+ * `null` si el patrón nuevo no tiene ninguna ocurrencia por delante (la fecha
+ * de fin quedó en el pasado): la regla terminó.
+ */
+const reanchor = (
+  spec: RecurrenceSpec,
+  notBefore: CalendarDate,
+): CalendarDate | null => {
+  const problems = validateRecurrence(spec);
+  if (problems.length > 0) {
+    throw errors.validation({ recurrence: problems });
+  }
+  const window = occurrencesUpTo(spec, notBefore, notBefore, 1);
+  return window.dates[0] ?? window.next;
+};
+
 export const createRecurringRule = async (
   db: ScopedDb,
   tx: TransactionClient,
-  space: { readonly spaceId: string },
+  space: { readonly spaceId: string; readonly primaryCurrency: string },
   actor: { readonly userId: string; readonly name: string },
   input: CreateRecurringRuleRequest,
 ): Promise<string> => {
+  const accountId = input.accountId ?? null;
+
+  // El contrato ya lo rechaza; acá se vuelve a mirar porque el service es el
+  // último que decide antes de la base, y la base tiene el CHECK.
+  if (accountId === null && input.autoPost) {
+    throw errors.conflict("UNPROCESSABLE", NO_ACCOUNT_AUTOPOST_MESSAGE);
+  }
+
   const { currency: accountCurrency } = await validateReferences(
     db,
-    input.accountId,
+    accountId,
     input.categoryId,
     input.type,
   );
@@ -270,13 +314,14 @@ export const createRecurringRule = async (
   const created = await tx.recurringRule.create({
     data: {
       spaceId: space.spaceId,
-      accountId: input.accountId,
+      accountId,
       categoryId: input.categoryId ?? null,
       createdByUserId: actor.userId,
       createdByName: actor.name,
       type: input.type,
       amountMinor: BigInt(input.amountMinor),
-      currency: input.currency ?? accountCurrency,
+      // Sin cuenta no hay de dónde tomar la moneda: la primaria del Space.
+      currency: input.currency ?? accountCurrency ?? space.primaryCurrency,
       description: input.description ?? null,
       payee: input.payee ?? null,
       frequency: input.frequency,
@@ -321,6 +366,8 @@ export const updateRecurringRule = async (
       id: true,
       type: true,
       accountId: true,
+      currency: true,
+      autoPost: true,
       frequency: true,
       interval: true,
       byMonthDay: true,
@@ -335,29 +382,48 @@ export const updateRecurringRule = async (
 
   if (existing === null) throw errors.notFound("No se encontró la regla");
 
+  const type = existing.type as "INCOME" | "EXPENSE";
+  const accountId =
+    input.accountId !== undefined ? input.accountId : existing.accountId;
+  const autoPost = input.autoPost ?? existing.autoPost;
+
+  // La regla RESULTANTE es la que no puede quedar sin cuenta y dada por hecha.
+  if (accountId === null && autoPost) {
+    throw errors.conflict("UNPROCESSABLE", NO_ACCOUNT_AUTOPOST_MESSAGE);
+  }
+
   if (input.accountId !== undefined || input.categoryId !== undefined) {
-    await validateReferences(
+    const { currency } = await validateReferences(
       db,
-      input.accountId ?? existing.accountId,
+      accountId,
       input.categoryId,
-      existing.type as "INCOME" | "EXPENSE",
+      type,
     );
+
+    /**
+     * Cambiar a una cuenta en otra moneda dejaría un importe en euros
+     * asentándose en pesos. La moneda de la regla no se edita —cambiarla
+     * redefiniría lo que significa el importe—, así que la cuenta tiene que
+     * estar en la misma.
+     */
+    if (
+      input.accountId != null &&
+      currency !== null &&
+      currency !== existing.currency
+    ) {
+      throw errors.conflict(
+        "UNPROCESSABLE",
+        `La cuenta está en ${currency} y el programado en ${existing.currency}`,
+      );
+    }
   }
 
   const touchesPattern = PATTERN_FIELDS.some(
     (field) => input[field] !== undefined,
   );
 
-  /**
-   * Si cambió el patrón se reancla la serie. Las ocurrencias YA materializadas
-   * no se tocan: son hechos económicos pasados y borrarlas al editar la regla
-   * sería reescribir el historial.
-   *
-   * El nuevo `nextRunDate` no puede ser anterior al que ya había: si no, mover
-   * la fecha de inicio hacia atrás haría que el job regenerara meses que ya
-   * están cargados. El unique parcial los rechazaría, pero es mejor no llegar.
-   */
   let nextRunDate: Date | undefined;
+  let finished = false;
 
   if (touchesPattern) {
     const spec: RecurrenceSpec = {
@@ -381,7 +447,9 @@ export const updateRecurringRule = async (
       byMonth: input.byMonth !== undefined ? input.byMonth : existing.byMonth,
     };
 
-    nextRunDate = fromCalendarDate(nextRunFor(spec));
+    const next = reanchor(spec, toCalendarDate(existing.nextRunDate));
+    if (next === null) finished = true;
+    else nextRunDate = fromCalendarDate(next);
   }
 
   await tx.recurringRule.update({
@@ -418,10 +486,61 @@ export const updateRecurringRule = async (
         ? { maxOccurrences: input.maxOccurrences }
         : {}),
       ...(input.autoPost !== undefined ? { autoPost: input.autoPost } : {}),
-      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      // Un patrón sin ocurrencias por delante termina la regla acá mismo, en
+      // vez de dejarla activa hasta que el job la encuentre.
+      ...(finished
+        ? { isActive: false }
+        : input.isActive !== undefined
+          ? { isActive: input.isActive }
+          : {}),
       ...(nextRunDate !== undefined ? { nextRunDate } : {}),
     },
   });
+};
+
+/**
+ * Qué cuenta usar para aceptar las ocurrencias vencidas de una regla.
+ *
+ * Con cuenta en la regla, esa; lo que venga en el pedido se ignora. Sin
+ * cuenta, la que se elige ahora: tiene que ser del Space, estar en uso y en la
+ * moneda del programado —el importe no se convierte al aceptar.
+ */
+export const resolveAcceptAccount = async (
+  db: ScopedDb,
+  ruleId: string,
+  requestedAccountId: string | undefined,
+): Promise<{ accountId: string | undefined }> => {
+  const rule = await db.recurringRule.findFirst({
+    where: { id: ruleId },
+    select: { accountId: true, currency: true },
+  });
+  if (rule === null) throw errors.notFound("No se encontró la regla");
+
+  if (rule.accountId !== null) return { accountId: undefined };
+
+  if (requestedAccountId === undefined) {
+    throw errors.conflict(
+      "UNPROCESSABLE",
+      "Este programado no tiene cuenta: elegí de qué cuenta salió para aceptarlo",
+    );
+  }
+
+  const account = await db.account.findFirst({
+    where: { id: requestedAccountId },
+    select: { currency: true, isArchived: true },
+  });
+  if (account === null) throw errors.notFound("No se encontró la cuenta");
+  if (account.isArchived) {
+    throw errors.conflict("CONFLICT", "Esa cuenta está archivada");
+  }
+  if (account.currency !== rule.currency) {
+    throw errors.conflict(
+      "UNPROCESSABLE",
+      `La cuenta está en ${account.currency} y el programado en ${rule.currency}`,
+    );
+  }
+
+  return { accountId: requestedAccountId };
 };
 
 /**
