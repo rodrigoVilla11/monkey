@@ -12,6 +12,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 
+import { ExportDrawer } from "@/components/reports/export-drawer";
 import { PeriodPicker } from "@/components/reports/period-picker";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
@@ -20,6 +21,7 @@ import { SegmentedToggle } from "@/components/ui/segmented-toggle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, qs } from "@/lib/api-client";
 import { formatMoneyDTO, formatPercent, initials } from "@/lib/format";
+import { useAccounts } from "@/lib/hooks/use-domain";
 import { useActiveSpace, useSession } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -167,6 +169,7 @@ function ReportsScreen() {
   const spaceId = space?.id ?? "";
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const accounts = useAccounts(spaceId);
 
   const timezone = session.data?.timezone;
   const today = useMemo(
@@ -204,10 +207,21 @@ function ReportsScreen() {
 
   const isShared = (space?.memberCount ?? 1) > 1;
   const visible = TABS.filter((t) => t.id !== "members" || isShared);
+  const exportAccounts = (accounts.data ?? [])
+    .filter((account) => !account.isArchived)
+    .map((account) => ({ id: account.id, name: account.name }));
 
   return (
     <div className="space-y-4 py-3">
-      <h1 className="text-xl font-semibold">Reportes</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold">Reportes</h1>
+        <ExportDrawer
+          spaceId={spaceId}
+          range={range}
+          locale={locale}
+          accounts={exportAccounts}
+        />
+      </div>
 
       <PeriodPicker
         range={range}

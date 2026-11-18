@@ -23,17 +23,37 @@ import { calendarDateSchema, cuidSchema } from "./common";
  * Módulo puro: sin Next, sin Prisma, sin React.
  */
 
-export const exportQuerySchema = z.object({
-  from: calendarDateSchema.optional(),
-  to: calendarDateSchema.optional(),
-  accountId: cuidSchema.optional(),
-  /**
-   * Separador. Por defecto, el que le corresponde al locale de quien pide:
-   * donde la coma es decimal, Excel espera `;` y con `,` abre todo en una
-   * columna.
-   */
-  delimiter: z.enum([",", ";", "tab"]).optional(),
-});
+export const EXPORT_FORMATS = ["csv", "xlsx"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+export const exportQuerySchema = z
+  .object({
+    from: calendarDateSchema.optional(),
+    to: calendarDateSchema.optional(),
+    accountId: cuidSchema.optional(),
+    /**
+     * `csv`: una tabla plana, reimportable. `xlsx`: un libro de Excel con los
+     * movimientos y hojas de resumen (por período, por categoría, por
+     * miembro), para mirar, no para reimportar.
+     */
+    format: z.enum(EXPORT_FORMATS).default("csv"),
+    /**
+     * Separador del CSV. Por defecto, el que le corresponde al locale de quien
+     * pide: donde la coma es decimal, Excel espera `;` y con `,` abre todo en
+     * una columna.
+     */
+    delimiter: z.enum([",", ";", "tab"]).optional(),
+  })
+  .refine(
+    (value) =>
+      value.from === undefined ||
+      value.to === undefined ||
+      value.from <= value.to,
+    {
+      message: "El inicio del rango tiene que ser anterior al fin",
+      path: ["to"],
+    },
+  );
 
 export type ExportQuery = z.infer<typeof exportQuerySchema>;
 

@@ -141,9 +141,46 @@ export const apiFetch = async <T>(
   return (await response.json()) as T;
 };
 
+export interface DownloadedFile {
+  readonly blob: Blob;
+  /** El nombre que propuso el servidor en Content-Disposition, si vino. */
+  readonly filename: string | null;
+}
+
+/**
+ * Descarga un archivo (CSV, Excel) con la misma sesión y el mismo reintento
+ * tras un 401 que el resto de la API. Un `<a href>` directo a la ruta no
+ * sirve: con el access token vencido el navegador mostraría el JSON del error
+ * en vez de renovar la sesión.
+ */
+export const apiDownload = async (path: string): Promise<DownloadedFile> => {
+  let response = await send(path, {});
+
+  if (response.status === 401 && !path.startsWith("/auth/")) {
+    const renewed = await refreshSession();
+
+    if (!renewed) {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+      throw await parseError(response);
+    }
+
+    response = await send(path, {});
+  }
+
+  if (!response.ok) throw await parseError(response);
+
+  const filename =
+    /filename="([^"]+)"/.exec(
+      response.headers.get("content-disposition") ?? "",
+    )?.[1] ?? null;
+
+  return { blob: await response.blob(), filename };
+};
+
 export const api = {
   get: <T>(path: string, signal?: AbortSignal): Promise<T> =>
     apiFetch<T>(path, signal !== undefined ? { signal } : {}),
+  download: apiDownload,
   post: <T>(path: string, body?: unknown): Promise<T> =>
     apiFetch<T>(path, { method: "POST", body: body ?? {} }),
   patch: <T>(path: string, body: unknown): Promise<T> =>

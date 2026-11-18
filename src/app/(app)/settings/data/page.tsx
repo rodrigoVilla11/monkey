@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api-client";
+import { saveBlob } from "@/lib/download";
 import { useAccounts } from "@/lib/hooks/use-domain";
 import { useActiveSpace } from "@/lib/hooks/use-session";
 import { spaceScopeKey } from "@/lib/query-keys";
@@ -57,39 +58,24 @@ export default function DataPage() {
 }
 
 function ExportCard({ spaceId }: { spaceId: string }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"csv" | "xlsx" | null>(null);
 
-  const download = async (): Promise<void> => {
-    setBusy(true);
+  /**
+   * Va por el cliente de la API y no por un enlace directo: así renueva la
+   * sesión si el token venció, en vez de guardar un JSON de error como si
+   * fuera el archivo.
+   */
+  const download = async (format: "csv" | "xlsx"): Promise<void> => {
+    setBusy(format);
     try {
-      /**
-       * Va por `fetch` a mano y no por el cliente tipado porque la respuesta es
-       * un archivo, no JSON. Se descarga con un enlace temporal: es la única
-       * forma de que el navegador respete el nombre del Content-Disposition.
-       */
-      const response = await fetch(
-        `/api/v1/spaces/${spaceId}/transactions/export`,
-        { credentials: "include" },
+      const file = await api.download(
+        `/spaces/${spaceId}/transactions/export?format=${format}`,
       );
-
-      if (!response.ok) throw new Error("fallo la descarga");
-
-      const blob = await response.blob();
-      const name =
-        /filename="([^"]+)"/.exec(
-          response.headers.get("content-disposition") ?? "",
-        )?.[1] ?? "monkey.csv";
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = name;
-      link.click();
-      URL.revokeObjectURL(url);
+      saveBlob(file.blob, file.filename ?? `monkey.${format}`);
     } catch {
       toast.error("No se pudo exportar");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -100,19 +86,41 @@ function ExportCard({ spaceId }: { spaceId: string }) {
         <span className="text-sm font-semibold">Exportar movimientos</span>
       </div>
       <p className="text-xs text-muted-foreground">
-        Un CSV con todo lo cargado. Se abre en Excel o Google Sheets sin tocar
-        nada, y se puede volver a importar sin que se duplique nada.
+        Todo lo cargado. El Excel trae además hojas de resumen por período,
+        categoría y miembro; el CSV es la tabla plana que se puede volver a
+        importar sin que se duplique nada. Para exportar solo un período o una
+        cuenta, usá Exportar en Reportes.
       </p>
-      <Button
-        variant="outline"
-        className="min-h-touch"
-        disabled={busy || spaceId === ""}
-        onClick={() => {
-          void download();
-        }}
-      >
-        {busy ? <Loader2 className="size-4 animate-spin" /> : "Descargar CSV"}
-      </Button>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          variant="outline"
+          className="min-h-touch"
+          disabled={busy !== null || spaceId === ""}
+          onClick={() => {
+            void download("xlsx");
+          }}
+        >
+          {busy === "xlsx" ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            "Descargar Excel"
+          )}
+        </Button>
+        <Button
+          variant="outline"
+          className="min-h-touch"
+          disabled={busy !== null || spaceId === ""}
+          onClick={() => {
+            void download("csv");
+          }}
+        >
+          {busy === "csv" ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            "Descargar CSV"
+          )}
+        </Button>
+      </div>
     </Card>
   );
 }

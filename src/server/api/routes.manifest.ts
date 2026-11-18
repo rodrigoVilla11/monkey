@@ -303,7 +303,7 @@ export const ROUTES: readonly RouteSpec[] = [
     path: "/api/v1/spaces/[spaceId]/transactions/export",
     auth: "verified",
     minRole: "VIEWER",
-    note: "Devuelve text/csv, no JSON",
+    note: "Devuelve un archivo, no JSON: text/csv por defecto o un libro de Excel con `format=xlsx`",
   },
   {
     method: "POST",

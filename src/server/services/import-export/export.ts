@@ -52,12 +52,15 @@ export interface ExportResult {
   readonly filename: string;
 }
 
+/** Lo que le importa al CSV de la query: el formato ya lo decidió la ruta. */
+type CsvExportQuery = Omit<ExportQuery, "format">;
+
 export const exportTransactions = async (
   db: ScopedDb,
   options: {
     readonly locale: string;
     readonly spaceName: string;
-    readonly query: ExportQuery;
+    readonly query: CsvExportQuery;
   },
 ): Promise<ExportResult> => {
   const { query } = options;
@@ -175,7 +178,7 @@ const categoryPath = (
     : `${category.parent.name} > ${category.name}`;
 };
 
-const buildFilename = (spaceName: string, query: ExportQuery): string => {
+const buildFilename = (spaceName: string, query: CsvExportQuery): string => {
   const slug = spaceName
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")

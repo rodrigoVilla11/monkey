@@ -81,12 +81,15 @@ export const noContent = (cookies: readonly string[] = []): NextResponse => {
  * pueden quedar en el caché de un proxy compartido.
  */
 export const attachment = (
-  content: string,
+  content: string | Uint8Array,
   options: { readonly filename: string; readonly contentType: string },
 ): NextResponse => {
   const safeName = options.filename.replace(/["\r\n\\]/g, "");
+  // Un Buffer de Node puede venir sobre memoria compartida; la respuesta
+  // exige bytes propios. La copia cuesta lo que pesa el archivo, una vez.
+  const body = typeof content === "string" ? content : new Uint8Array(content);
 
-  return new NextResponse(content, {
+  return new NextResponse(body, {
     status: 200,
     headers: {
       "content-type": options.contentType,

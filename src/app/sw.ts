@@ -106,9 +106,14 @@ const handleSpaceApi = async ({
 
 const runtimeCaching: RuntimeCaching[] = [
   {
-    // Datos del Space: network-first con caché por Space.
+    // Datos del Space: network-first con caché por Space. Las descargas
+    // (CSV, Excel) quedan fuera: un archivo de varios MB en el caché no sirve
+    // de nada sin conexión y desplaza respuestas que sí.
     matcher: ({ url, request, sameOrigin }) =>
-      sameOrigin && request.method === "GET" && SPACE_ROUTE.test(url.pathname),
+      sameOrigin &&
+      request.method === "GET" &&
+      SPACE_ROUTE.test(url.pathname) &&
+      !url.pathname.endsWith("/transactions/export"),
     handler: handleSpaceApi,
   },
   {
